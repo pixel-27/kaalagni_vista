@@ -7,12 +7,19 @@ export interface ImageAttachment {
   size_bytes?: number
 }
 
+export type InputMode = 'text' | 'voice'
+
+export type VoiceRecognitionState = 'idle' | 'listening' | 'processing' | 'error' | 'unsupported'
+export type VoicePlaybackState = 'idle' | 'speaking' | 'paused' | 'unsupported'
+
 export interface ChatMessage {
   role: Role
   content: string
   attachments?: ImageAttachment[]
+  input_mode?: InputMode
   timestamp?: string
 }
+
 
 
 export interface ChatResponse {

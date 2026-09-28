@@ -1,6 +1,12 @@
 import { useState, useEffect, useRef } from 'react'
 import { ChatMessageView } from './components/ChatMessageView'
-import type { ChatMessage, ChatResponse, HealthData, ImageAttachment } from './types'
+import type { ChatMessage, ChatResponse, HealthData, ImageAttachment, VoiceRecognitionState, VoicePlaybackState, InputMode } from './types'
+import {
+  VoiceRecognitionController,
+  VoiceSynthesisController,
+  isSpeechRecognitionSupported,
+  isSpeechSynthesisSupported,
+} from './services/voice'
 
 const QUICK_STARTERS = [
   {
@@ -38,6 +44,19 @@ export default function App() {
   const [isDragging, setIsDragging] = useState(false)
   const [diagnosticState, setDiagnosticState] = useState<'idle' | 'uploading' | 'analyzing' | 'thinking' | 'responding'>('idle')
 
+  // Voice interaction state (Phase 4)
+  const [voiceRecState, setVoiceRecState] = useState<VoiceRecognitionState>(
+    isSpeechRecognitionSupported() ? 'idle' : 'unsupported'
+  )
+  const [voicePlayState, setVoicePlayState] = useState<VoicePlaybackState>(
+    isSpeechSynthesisSupported() ? 'idle' : 'unsupported'
+  )
+  const [voiceErrorMessage, setVoiceErrorMessage] = useState<string | null>(null)
+  const [interimTranscript, setInterimTranscript] = useState('')
+  const [autoSpeak, setAutoSpeak] = useState(false)
+  const [currentlySpeakingText, setCurrentlySpeakingText] = useState<string | null>(null)
+  const [lastInputMode, setLastInputMode] = useState<InputMode>('text')
+
   // Health telemetry state (preserved from Phase 1)
   const [health, setHealth] = useState<HealthData | null>(null)
   const [healthStatus, setHealthStatus] = useState<'checking' | 'connected' | 'error'>('checking')
@@ -46,6 +65,60 @@ export default function App() {
   const messagesEndRef = useRef<HTMLDivElement>(null)
   const textareaRef = useRef<HTMLTextAreaElement>(null)
   const fileInputRef = useRef<HTMLInputElement>(null)
+  const recognitionRef = useRef<VoiceRecognitionController | null>(null)
+  const synthesisRef = useRef<VoiceSynthesisController | null>(null)
+
+  useEffect(() => {
+    const rec = new VoiceRecognitionController({
+      onStateChange: (state) => setVoiceRecState(state),
+      onInterimTranscript: (text) => setInterimTranscript(text),
+      onFinalTranscript: (text) => {
+        setInterimTranscript('')
+        setLastInputMode('voice')
+        setInput((prev) => (prev ? `${prev.trim()} ${text}` : text))
+      },
+      onError: (err) => setVoiceErrorMessage(err),
+    })
+    recognitionRef.current = rec
+
+    const syn = new VoiceSynthesisController({
+      onStateChange: (state) => {
+        setVoicePlayState(state)
+        if (state === 'idle') {
+          setCurrentlySpeakingText(null)
+        }
+      },
+      onError: (err) => setVoiceErrorMessage(err),
+    })
+    synthesisRef.current = syn
+
+    return () => {
+      rec.destroy()
+      syn.stop()
+    }
+  }, [])
+
+  const toggleVoiceRecognition = () => {
+    setVoiceErrorMessage(null)
+    if (voiceRecState === 'listening') {
+      recognitionRef.current?.stop()
+    } else {
+      if (voicePlayState === 'speaking') {
+        synthesisRef.current?.stop()
+      }
+      recognitionRef.current?.start()
+    }
+  }
+
+  const handleToggleSpeak = (content: string) => {
+    if (voicePlayState === 'speaking' && currentlySpeakingText === content) {
+      synthesisRef.current?.stop()
+      setCurrentlySpeakingText(null)
+    } else {
+      synthesisRef.current?.speak(content)
+      setCurrentlySpeakingText(content)
+    }
+  }
 
 
   const scrollToBottom = () => {
@@ -141,8 +214,14 @@ export default function App() {
   const sendMessage = async (textToSend?: string) => {
     const content = (textToSend || input).trim()
     const currentAttachment = pendingAttachment
+    const currentInputMode: InputMode = lastInputMode
 
     if ((!content && !currentAttachment) || loading) return
+
+    // Stop active speech recognition when sending
+    if (voiceRecState === 'listening') {
+      recognitionRef.current?.stop()
+    }
 
     setError(null)
     const finalContent = content || "VISTA, look at this error and tell me what's wrong."
@@ -150,6 +229,7 @@ export default function App() {
       role: 'user',
       content: finalContent,
       attachments: currentAttachment ? [currentAttachment] : undefined,
+      input_mode: currentInputMode,
       timestamp: new Date().toISOString(),
     }
 
@@ -157,6 +237,7 @@ export default function App() {
     setMessages(updatedHistory)
     setInput('')
     setPendingAttachment(null)
+    setLastInputMode('text')
     setLoading(true)
 
     if (currentAttachment) {
@@ -173,6 +254,7 @@ export default function App() {
           role: m.role,
           content: m.content,
           attachments: m.attachments,
+          input_mode: m.input_mode,
         })),
       }
 
@@ -205,6 +287,12 @@ export default function App() {
       const data: ChatResponse = await res.json()
       setMessages([...updatedHistory, data.message])
       setLastModelUsed(`${data.provider} · ${data.model}`)
+
+      // Auto-read response aloud if enabled
+      if (autoSpeak && data.message.content) {
+        synthesisRef.current?.speak(data.message.content)
+        setCurrentlySpeakingText(data.message.content)
+      }
     } catch (err: unknown) {
       const msg = err instanceof Error ? err.message : 'Failed to communicate with VISTA backend'
       setError(msg)
@@ -222,9 +310,11 @@ export default function App() {
     }
   }
 
-
   const clearChat = () => {
     if (window.confirm('Reset conversation history?')) {
+      synthesisRef.current?.stop()
+      recognitionRef.current?.stop()
+      setCurrentlySpeakingText(null)
       setMessages([])
       setError(null)
     }
@@ -272,13 +362,13 @@ export default function App() {
                   padding: '0.12rem 0.45rem',
                   borderRadius: '4px',
                   backgroundColor: '#1e293b',
-                  color: 'var(--accent-blue)',
+                  color: 'var(--accent-cyan)',
                   fontWeight: 600,
                   textTransform: 'uppercase',
                   border: '1px solid #334155',
                 }}
               >
-                Text AI
+                Voice & Vision
               </span>
             </div>
             <p style={{ fontSize: '0.7rem', color: 'var(--text-muted)' }}>
@@ -308,6 +398,36 @@ export default function App() {
 
         {/* Actions & Health Status */}
         <div style={{ display: 'flex', alignItems: 'center', gap: '0.85rem' }}>
+          {/* Auto-Speak Toggle */}
+          <button
+            type="button"
+            onClick={() => {
+              const next = !autoSpeak
+              setAutoSpeak(next)
+              if (!next && voicePlayState === 'speaking') {
+                synthesisRef.current?.stop()
+                setCurrentlySpeakingText(null)
+              }
+            }}
+            title="Toggle automatic speech synthesis for assistant responses"
+            style={{
+              display: 'flex',
+              alignItems: 'center',
+              gap: '0.4rem',
+              padding: '0.35rem 0.75rem',
+              fontSize: '0.72rem',
+              borderRadius: '6px',
+              backgroundColor: autoSpeak ? 'rgba(6, 182, 212, 0.15)' : '#1e293b',
+              border: autoSpeak ? '1px solid var(--accent-cyan)' : '1px solid #334155',
+              color: autoSpeak ? 'var(--accent-cyan)' : 'var(--text-secondary)',
+              cursor: 'pointer',
+              transition: 'all 0.2s',
+            }}
+          >
+            <span>{autoSpeak ? '🔊' : '🔈'}</span>
+            <span>Auto-Speak: {autoSpeak ? 'ON' : 'OFF'}</span>
+          </button>
+
           {messages.length > 0 && (
             <button
               onClick={clearChat}
@@ -461,6 +581,19 @@ export default function App() {
           <span
             style={{
               padding: '0.15rem 0.5rem',
+              backgroundColor: voiceRecState === 'listening' ? 'rgba(239, 68, 68, 0.15)' : 'rgba(6, 182, 212, 0.12)',
+              color: voiceRecState === 'listening' ? '#ef4444' : 'var(--accent-cyan)',
+              borderRadius: '4px',
+              border: voiceRecState === 'listening' ? '1px solid rgba(239, 68, 68, 0.4)' : '1px solid rgba(6, 182, 212, 0.3)',
+              fontSize: '0.68rem',
+              fontWeight: 600,
+            }}
+          >
+            {voiceRecState === 'listening' ? '🔴 Voice: Listening' : '🎙 Voice & Speech Active'}
+          </span>
+          <span
+            style={{
+              padding: '0.15rem 0.5rem',
               backgroundColor: 'rgba(6, 182, 212, 0.12)',
               color: 'var(--accent-cyan)',
               borderRadius: '4px',
@@ -575,7 +708,13 @@ export default function App() {
             /* Message List */
             <div style={{ display: 'flex', flexDirection: 'column' }}>
               {messages.map((m, idx) => (
-                <ChatMessageView key={idx} message={m} modelName={m.role === 'assistant' ? lastModelUsed : undefined} />
+                <ChatMessageView
+                  key={idx}
+                  message={m}
+                  modelName={m.role === 'assistant' ? lastModelUsed : undefined}
+                  onSpeak={m.role === 'assistant' ? (content) => handleToggleSpeak(content) : undefined}
+                  isSpeaking={voicePlayState === 'speaking' && currentlySpeakingText === m.content}
+                />
               ))}
 
               {/* Thinking / Analyzing Indicator */}
@@ -754,6 +893,92 @@ export default function App() {
             </div>
           )}
 
+          {/* Active Voice Listening Banner */}
+          {(voiceRecState === 'listening' || interimTranscript) && (
+            <div
+              style={{
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'space-between',
+                padding: '0.55rem 0.85rem',
+                backgroundColor: 'rgba(239, 68, 68, 0.15)',
+                border: '1px solid rgba(239, 68, 68, 0.45)',
+                borderRadius: '8px',
+              }}
+            >
+              <div style={{ display: 'flex', alignItems: 'center', gap: '0.65rem' }}>
+                <span
+                  style={{
+                    display: 'inline-block',
+                    width: '9px',
+                    height: '9px',
+                    borderRadius: '50%',
+                    backgroundColor: '#ef4444',
+                    animation: 'pulse 1.5s infinite',
+                  }}
+                />
+                <span style={{ fontSize: '0.78rem', color: '#fca5a5', fontWeight: 600 }}>
+                  Listening:
+                </span>
+                <span style={{ fontSize: '0.82rem', color: '#ffffff', fontStyle: interimTranscript ? 'italic' : 'normal' }}>
+                  {interimTranscript ? `"${interimTranscript}"` : 'Speak into your microphone... (say your question)'}
+                </span>
+              </div>
+              <button
+                type="button"
+                onClick={() => recognitionRef.current?.stop()}
+                style={{
+                  fontSize: '0.72rem',
+                  padding: '0.2rem 0.6rem',
+                  backgroundColor: 'rgba(239, 68, 68, 0.3)',
+                  border: '1px solid rgba(239, 68, 68, 0.6)',
+                  borderRadius: '4px',
+                  color: '#ffffff',
+                  cursor: 'pointer',
+                  fontWeight: 600,
+                }}
+              >
+                Done Speaking
+              </button>
+            </div>
+          )}
+
+          {/* Voice Error Banner */}
+          {voiceErrorMessage && (
+            <div
+              style={{
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'space-between',
+                padding: '0.45rem 0.85rem',
+                backgroundColor: 'rgba(245, 158, 11, 0.12)',
+                border: '1px solid rgba(245, 158, 11, 0.35)',
+                borderRadius: '8px',
+                fontSize: '0.76rem',
+                color: '#fcd34d',
+              }}
+            >
+              <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+                <span>⚠️</span>
+                <span>{voiceErrorMessage}</span>
+              </div>
+              <button
+                type="button"
+                onClick={() => setVoiceErrorMessage(null)}
+                style={{
+                  background: 'none',
+                  border: 'none',
+                  color: '#fcd34d',
+                  cursor: 'pointer',
+                  fontSize: '0.85rem',
+                  padding: '0 0.3rem',
+                }}
+              >
+                ✕
+              </button>
+            </div>
+          )}
+
           {/* Textarea Box with drag highlight */}
           <div
             style={{
@@ -804,7 +1029,7 @@ export default function App() {
                 display: 'flex',
                 alignItems: 'center',
                 justifyContent: 'center',
-                marginRight: '0.5rem',
+                marginRight: '0.35rem',
                 marginBottom: '2px',
                 transition: 'color 0.2s, border-color 0.2s',
               }}
@@ -818,6 +1043,64 @@ export default function App() {
               📎
             </button>
 
+            {/* Microphone Voice Input Button */}
+            <button
+              type="button"
+              onClick={toggleVoiceRecognition}
+              disabled={loading || voiceRecState === 'unsupported'}
+              title={
+                voiceRecState === 'listening'
+                  ? 'Stop recording (Microphone active)'
+                  : voiceRecState === 'unsupported'
+                  ? 'Web Speech API is not supported in this browser'
+                  : 'Speak your question with microphone (Voice input)'
+              }
+              style={{
+                backgroundColor:
+                  voiceRecState === 'listening'
+                    ? 'rgba(239, 68, 68, 0.25)'
+                    : lastInputMode === 'voice'
+                    ? 'rgba(6, 182, 212, 0.18)'
+                    : 'transparent',
+                border:
+                  voiceRecState === 'listening'
+                    ? '1px solid #ef4444'
+                    : lastInputMode === 'voice'
+                    ? '1px solid var(--accent-cyan)'
+                    : '1px solid transparent',
+                color:
+                  voiceRecState === 'listening'
+                    ? '#ef4444'
+                    : lastInputMode === 'voice'
+                    ? 'var(--accent-cyan)'
+                    : voiceRecState === 'unsupported'
+                    ? '#475569'
+                    : 'var(--text-muted)',
+                padding: '0.5rem',
+                borderRadius: '6px',
+                cursor: loading || voiceRecState === 'unsupported' ? 'not-allowed' : 'pointer',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                marginRight: '0.5rem',
+                marginBottom: '2px',
+                transition: 'all 0.2s',
+                boxShadow: voiceRecState === 'listening' ? '0 0 10px rgba(239, 68, 68, 0.5)' : 'none',
+              }}
+              onMouseOver={(e) => {
+                if (voiceRecState !== 'listening' && voiceRecState !== 'unsupported') {
+                  e.currentTarget.style.color = '#ffffff'
+                }
+              }}
+              onMouseOut={(e) => {
+                if (voiceRecState !== 'listening' && voiceRecState !== 'unsupported' && lastInputMode !== 'voice') {
+                  e.currentTarget.style.color = 'var(--text-muted)'
+                }
+              }}
+            >
+              {voiceRecState === 'listening' ? '🔴' : '🎙️'}
+            </button>
+
             <textarea
               ref={textareaRef}
               rows={2}
@@ -829,7 +1112,7 @@ export default function App() {
               placeholder={
                 pendingAttachment
                   ? "Ask a technical question about this screenshot (or press Enter)..."
-                  : "Describe the bug, paste an error traceback, or Ctrl+V an error screenshot..."
+                  : "Describe the bug, paste an error traceback, speak via mic, or Ctrl+V a screenshot..."
               }
               style={{
                 flex: 1,
@@ -870,9 +1153,16 @@ export default function App() {
 
           {/* Input helper & Voice/Vision hints */}
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', fontSize: '0.7rem', color: 'var(--text-muted)' }}>
-            <span>Enter ↵ to send · Shift+Enter for new line · Ctrl+V to paste screenshot</span>
+            <span>Enter ↵ to send · Shift+Enter for new line · Click 🎙️ to speak · Ctrl+V to paste screenshot</span>
             <div style={{ display: 'flex', gap: '0.75rem' }}>
-              <span>🎙 Voice (Phase 5)</span>
+              <span
+                style={{
+                  color: voiceRecState === 'listening' ? '#ef4444' : voiceRecState === 'unsupported' ? 'var(--text-muted)' : 'var(--accent-cyan)',
+                  fontWeight: 600,
+                }}
+              >
+                {voiceRecState === 'listening' ? '🔴 Mic Active' : '🎙 Voice Ready'}
+              </span>
               <span style={{ color: 'var(--accent-cyan)', fontWeight: 600 }}>📎 Vision Ready</span>
               <span>⚡ Controlled Tools (Phase 7)</span>
             </div>

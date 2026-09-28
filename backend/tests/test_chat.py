@@ -399,3 +399,75 @@ async def test_chat_multi_turn_with_image_context():
         assert "KeyError: 'user_id'" in content
         assert "Pydantic" in content or "get" in content
 
+
+@pytest.mark.asyncio
+async def test_chat_voice_input_mode_accepted():
+    """Chat endpoint accepts user messages submitted via voice input mode."""
+    with patch("app.api.chat.get_llm_provider", return_value=MockProvider()):
+        async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+            res = await client.post(
+                "/api/chat",
+                json={
+                    "messages": [
+                        {
+                            "role": "user",
+                            "content": "What is the recommended pool timeout for asyncpg?",
+                            "input_mode": "voice",
+                        }
+                    ]
+                },
+            )
+        assert res.status_code == 200
+        data = res.json()
+        assert data["provider"] == "mock"
+        assert len(data["message"]["content"]) > 0
+
+
+@pytest.mark.asyncio
+async def test_chat_voice_turn_with_image_attachment():
+    """Chat endpoint accepts multimodal spoken query with screenshot attachment."""
+    with patch("app.api.chat.get_llm_provider", return_value=MockProvider()):
+        async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+            res = await client.post(
+                "/api/chat",
+                json={
+                    "messages": [
+                        {
+                            "role": "user",
+                            "content": "VISTA, look at this error and tell me what is wrong.",
+                            "input_mode": "voice",
+                            "attachments": [
+                                {
+                                    "mime_type": "image/png",
+                                    "data": VALID_PNG_B64,
+                                    "filename": "spoken_error_screen.png",
+                                }
+                            ],
+                        }
+                    ]
+                },
+            )
+        assert res.status_code == 200
+        data = res.json()
+        assert "diagnostic" in data["message"]["content"].lower() or "troubleshooting" in data["message"]["content"].lower()
+
+
+@pytest.mark.asyncio
+async def test_chat_invalid_input_mode_rejected():
+    """Chat endpoint rejects unsupported input_mode types."""
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+        res = await client.post(
+            "/api/chat",
+            json={
+                "messages": [
+                    {
+                        "role": "user",
+                        "content": "Diagnose my thoughts",
+                        "input_mode": "telepathy",
+                    }
+                ]
+            },
+        )
+    assert res.status_code == 422
+
+

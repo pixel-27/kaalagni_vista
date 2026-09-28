@@ -5,9 +5,11 @@ import type { ChatMessage } from '../types'
 interface ChatMessageViewProps {
   message: ChatMessage
   modelName?: string
+  onSpeak?: (content: string) => void
+  isSpeaking?: boolean
 }
 
-export function ChatMessageView({ message, modelName }: ChatMessageViewProps) {
+export function ChatMessageView({ message, modelName, onSpeak, isSpeaking }: ChatMessageViewProps) {
   const isUser = message.role === 'user'
 
   const formattedTime = message.timestamp
@@ -26,6 +28,25 @@ export function ChatMessageView({ message, modelName }: ChatMessageViewProps) {
         }}
       >
         <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', fontSize: '0.72rem', color: 'var(--text-muted)' }}>
+          {message.input_mode === 'voice' && (
+            <span
+              style={{
+                fontSize: '0.66rem',
+                fontFamily: 'var(--font-mono)',
+                padding: '0.1rem 0.4rem',
+                borderRadius: '4px',
+                backgroundColor: 'rgba(6, 182, 212, 0.15)',
+                color: 'var(--accent-cyan)',
+                border: '1px solid rgba(6, 182, 212, 0.35)',
+                display: 'inline-flex',
+                alignItems: 'center',
+                gap: '0.25rem',
+              }}
+              title="Query submitted via voice input"
+            >
+              🎙 Spoken
+            </span>
+          )}
           {formattedTime && <span>{formattedTime}</span>}
           <span style={{ fontWeight: 600, color: 'var(--accent-cyan)' }}>YOU</span>
         </div>
@@ -157,6 +178,29 @@ export function ChatMessageView({ message, modelName }: ChatMessageViewProps) {
           >
             {modelName}
           </span>
+        )}
+        {onSpeak && (
+          <button
+            type="button"
+            onClick={() => onSpeak(message.content)}
+            title={isSpeaking ? 'Stop text-to-speech audio playback' : 'Read VISTA response aloud with text-to-speech'}
+            style={{
+              display: 'inline-flex',
+              alignItems: 'center',
+              gap: '0.3rem',
+              padding: '0.15rem 0.5rem',
+              fontSize: '0.72rem',
+              borderRadius: '4px',
+              backgroundColor: isSpeaking ? 'rgba(239, 68, 68, 0.15)' : 'rgba(255, 255, 255, 0.05)',
+              border: isSpeaking ? '1px solid rgba(239, 68, 68, 0.4)' : '1px solid rgba(255, 255, 255, 0.1)',
+              color: isSpeaking ? '#f43f5e' : 'var(--text-secondary)',
+              cursor: 'pointer',
+              transition: 'all 0.2s',
+            }}
+          >
+            <span>{isSpeaking ? '⏹' : '🔊'}</span>
+            <span>{isSpeaking ? 'Stop' : 'Speak'}</span>
+          </button>
         )}
         {formattedTime && (
           <span style={{ fontSize: '0.7rem', color: 'var(--text-muted)', marginLeft: 'auto' }}>

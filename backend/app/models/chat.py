@@ -17,7 +17,12 @@ class ChatMessage(BaseModel):
         default=None,
         description="Optional visual attachments associated with this turn",
     )
+    input_mode: Optional[Literal["text", "voice"]] = Field(
+        default="text",
+        description="Input modality: 'text' or 'voice'",
+    )
     timestamp: Optional[str] = Field(default_factory=lambda: datetime.now(timezone.utc).isoformat())
+
 
 class ChatRequest(BaseModel):
     messages: List[ChatMessage] = Field(
