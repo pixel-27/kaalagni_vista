@@ -1,103 +1,198 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useRef } from 'react'
+import { ChatMessageView } from './components/ChatMessageView'
+import type { ChatMessage, ChatResponse, HealthData } from './types'
 
-interface HealthData {
-  status: string
-  project: string
-  version: string
-  timestamp: string
-  environment: string
-}
+const QUICK_STARTERS = [
+  {
+    title: 'FastAPI 500 Error',
+    subtitle: 'Unhandled exception & traceback diagnosis',
+    prompt: 'My FastAPI application is returning a 500 Internal Server Error. How do I diagnose the root cause?',
+  },
+  {
+    title: 'CORS Preflight Block',
+    subtitle: 'Access-Control-Allow-Origin header failure',
+    prompt: 'The browser is blocking my frontend API requests with a CORS preflight policy error. How do I configure CORSMiddleware in FastAPI?',
+  },
+  {
+    title: 'PostgreSQL Pool Timeout',
+    subtitle: 'Connection exhaustion under async load',
+    prompt: 'My async database connection pool is timing out with "OperationalError: connection pool exhausted". How should I tune pool size and timeout parameters?',
+  },
+  {
+    title: 'React State Desync',
+    subtitle: 'Infinite re-render in useEffect',
+    prompt: 'My React component is stuck in an infinite re-render loop inside a useEffect hook. How do I properly structure the dependency array?',
+  },
+]
 
 export default function App() {
-  const [health, setHealth] = useState<HealthData | null>(null)
-  const [status, setStatus] = useState<'checking' | 'connected' | 'error'>('checking')
-  const [latency, setLatency] = useState<number | null>(null)
-  const [errorMessage, setErrorMessage] = useState<string>('')
-  const [lastChecked, setLastChecked] = useState<string>('')
-  const [logs, setLogs] = useState<Array<{ time: string; msg: string; type: 'info' | 'success' | 'error' }>>([])
+  const [messages, setMessages] = useState<ChatMessage[]>([])
+  const [input, setInput] = useState('')
+  const [loading, setLoading] = useState(false)
+  const [error, setError] = useState<string | null>(null)
+  const [lastModelUsed, setLastModelUsed] = useState<string>('')
+  const [showHealthModal, setShowHealthModal] = useState(false)
 
-  const addLog = (msg: string, type: 'info' | 'success' | 'error') => {
-    const time = new Date().toLocaleTimeString()
-    setLogs((prev) => [{ time, msg, type }, ...prev.slice(0, 19)])
+  // Health telemetry state (preserved from Phase 1)
+  const [health, setHealth] = useState<HealthData | null>(null)
+  const [healthStatus, setHealthStatus] = useState<'checking' | 'connected' | 'error'>('checking')
+  const [latency, setLatency] = useState<number | null>(null)
+
+  const messagesEndRef = useRef<HTMLDivElement>(null)
+  const textareaRef = useRef<HTMLTextAreaElement>(null)
+
+  const scrollToBottom = () => {
+    messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' })
   }
 
-  const checkHealth = async () => {
-    setStatus('checking')
-    setErrorMessage('')
-    const start = performance.now()
-    addLog('Checking FastAPI /api/health endpoint...', 'info')
+  useEffect(() => {
+    scrollToBottom()
+  }, [messages, loading])
 
+  // Probe health endpoint
+  const checkHealth = async () => {
+    setHealthStatus('checking')
+    const start = performance.now()
     try {
-      // Try direct route through Vite proxy first, fallback to direct port 8000
       let res: Response
       try {
         res = await fetch('/api/health')
       } catch {
         res = await fetch('http://127.0.0.1:8000/api/health')
       }
-
       const elapsed = Math.round(performance.now() - start)
       setLatency(elapsed)
-
       if (res.ok) {
         const data: HealthData = await res.json()
         setHealth(data)
-        setStatus('connected')
-        setLastChecked(new Date().toLocaleTimeString())
-        addLog(`Connected to ${data.project} (v${data.version}) in ${elapsed}ms`, 'success')
+        setHealthStatus('connected')
       } else {
-        throw new Error(`Server returned HTTP ${res.status}: ${res.statusText}`)
+        setHealthStatus('error')
       }
-    } catch (err: unknown) {
-      const msg = err instanceof Error ? err.message : 'Failed to reach FastAPI backend'
-      setStatus('error')
-      setErrorMessage(msg)
-      addLog(`Health check failed: ${msg}`, 'error')
+    } catch {
+      setHealthStatus('error')
     }
   }
 
   useEffect(() => {
     checkHealth()
+    const interval = setInterval(checkHealth, 30000)
+    return () => clearInterval(interval)
   }, [])
 
+  const sendMessage = async (textToSend?: string) => {
+    const content = (textToSend || input).trim()
+    if (!content || loading) return
+
+    setError(null)
+    const userMessage: ChatMessage = {
+      role: 'user',
+      content,
+      timestamp: new Date().toISOString(),
+    }
+
+    const updatedHistory = [...messages, userMessage]
+    setMessages(updatedHistory)
+    setInput('')
+    setLoading(true)
+
+    try {
+      let res: Response
+      const payload = {
+        messages: updatedHistory.map((m) => ({ role: m.role, content: m.content })),
+      }
+
+      try {
+        res = await fetch('/api/chat', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(payload),
+        })
+      } catch {
+        res = await fetch('http://127.0.0.1:8000/api/chat', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(payload),
+        })
+      }
+
+      if (!res.ok) {
+        let errDetail = `Server returned HTTP ${res.status}: ${res.statusText}`
+        try {
+          const errData = await res.json()
+          if (errData.detail) errDetail = errData.detail
+        } catch {
+          // ignore json parse error
+        }
+        throw new Error(errDetail)
+      }
+
+      const data: ChatResponse = await res.json()
+      setMessages([...updatedHistory, data.message])
+      setLastModelUsed(`${data.provider} · ${data.model}`)
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : 'Failed to communicate with VISTA backend'
+      setError(msg)
+    } finally {
+      setLoading(false)
+      setTimeout(() => textareaRef.current?.focus(), 50)
+    }
+  }
+
+  const handleKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
+    if (e.key === 'Enter' && !e.shiftKey) {
+      e.preventDefault()
+      sendMessage()
+    }
+  }
+
+  const clearChat = () => {
+    if (window.confirm('Reset conversation history?')) {
+      setMessages([])
+      setError(null)
+    }
+  }
+
   return (
-    <div style={{ minHeight: '100vh', display: 'flex', flexDirection: 'column' }}>
-      {/* Top Header */}
+    <div style={{ display: 'flex', flexDirection: 'column', height: '100vh', overflow: 'hidden' }}>
+      {/* VISTA Header */}
       <header
         style={{
           borderBottom: '1px solid var(--border-subtle)',
           backgroundColor: 'var(--bg-secondary)',
-          padding: '1rem 2rem',
+          padding: '0.75rem 1.75rem',
           display: 'flex',
           alignItems: 'center',
           justifyContent: 'space-between',
+          flexShrink: 0,
         }}
       >
-        <div style={{ display: 'flex', alignItems: 'center', gap: '1rem' }}>
+        {/* Brand */}
+        <div style={{ display: 'flex', alignItems: 'center', gap: '0.85rem' }}>
           <div
             style={{
-              width: '36px',
-              height: '36px',
+              width: '34px',
+              height: '34px',
               borderRadius: '8px',
               background: 'linear-gradient(135deg, #0284c7 0%, #06b6d4 100%)',
               display: 'flex',
               alignItems: 'center',
               justifyContent: 'center',
               fontWeight: 700,
-              fontSize: '18px',
+              fontSize: '17px',
               color: '#ffffff',
-              boxShadow: '0 0 15px rgba(6, 182, 212, 0.4)',
+              boxShadow: '0 0 14px rgba(6, 182, 212, 0.4)',
             }}
           >
             V
           </div>
           <div>
-            <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem' }}>
-              <h1 style={{ fontSize: '1.25rem', fontWeight: 700, letterSpacing: '0.05em' }}>VISTA</h1>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '0.6rem' }}>
+              <span style={{ fontSize: '1.15rem', fontWeight: 700, letterSpacing: '0.04em' }}>VISTA</span>
               <span
                 style={{
-                  fontSize: '0.7rem',
-                  padding: '0.15rem 0.5rem',
+                  fontSize: '0.65rem',
+                  padding: '0.12rem 0.45rem',
                   borderRadius: '4px',
                   backgroundColor: '#1e293b',
                   color: 'var(--accent-blue)',
@@ -106,439 +201,465 @@ export default function App() {
                   border: '1px solid #334155',
                 }}
               >
-                Phase 1: Foundation
+                Text AI
               </span>
             </div>
-            <p style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>
+            <p style={{ fontSize: '0.7rem', color: 'var(--text-muted)' }}>
               Visual Intelligence & Spoken Technical Assistant
             </p>
           </div>
         </div>
 
-        {/* System Status Indicator */}
-        <div style={{ display: 'flex', alignItems: 'center', gap: '1.5rem' }}>
-          {latency !== null && status === 'connected' && (
-            <span style={{ fontSize: '0.75rem', fontFamily: 'var(--font-mono)', color: 'var(--text-muted)' }}>
-              Latency: <span style={{ color: 'var(--accent-emerald)' }}>{latency}ms</span>
+        {/* Center / Model Info */}
+        <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem' }}>
+          {lastModelUsed && (
+            <span
+              style={{
+                fontSize: '0.72rem',
+                fontFamily: 'var(--font-mono)',
+                color: 'var(--accent-cyan)',
+                backgroundColor: 'rgba(6, 182, 212, 0.08)',
+                padding: '0.2rem 0.6rem',
+                borderRadius: '4px',
+                border: '1px solid rgba(6, 182, 212, 0.25)',
+              }}
+            >
+              Active: {lastModelUsed}
             </span>
           )}
-          <div
+        </div>
+
+        {/* Actions & Health Status */}
+        <div style={{ display: 'flex', alignItems: 'center', gap: '0.85rem' }}>
+          {messages.length > 0 && (
+            <button
+              onClick={clearChat}
+              style={{
+                fontSize: '0.72rem',
+                padding: '0.35rem 0.75rem',
+                backgroundColor: '#1e293b',
+                color: 'var(--text-secondary)',
+                borderRadius: '6px',
+                border: '1px solid #334155',
+                cursor: 'pointer',
+              }}
+            >
+              Clear Chat
+            </button>
+          )}
+
+          {/* System Status Pill */}
+          <button
+            onClick={() => setShowHealthModal(!showHealthModal)}
+            title="Click to view backend diagnostics"
             style={{
               display: 'flex',
               alignItems: 'center',
-              gap: '0.5rem',
-              padding: '0.4rem 0.85rem',
+              gap: '0.45rem',
+              padding: '0.35rem 0.75rem',
               borderRadius: '9999px',
               backgroundColor:
-                status === 'connected'
+                healthStatus === 'connected'
                   ? 'rgba(16, 185, 129, 0.1)'
-                  : status === 'checking'
+                  : healthStatus === 'checking'
                   ? 'rgba(245, 158, 11, 0.1)'
                   : 'rgba(244, 63, 94, 0.1)',
               border: `1px solid ${
-                status === 'connected'
+                healthStatus === 'connected'
                   ? 'rgba(16, 185, 129, 0.3)'
-                  : status === 'checking'
+                  : healthStatus === 'checking'
                   ? 'rgba(245, 158, 11, 0.3)'
                   : 'rgba(244, 63, 94, 0.3)'
               }`,
+              cursor: 'pointer',
             }}
           >
             <span
               style={{
-                width: '8px',
-                height: '8px',
+                width: '7px',
+                height: '7px',
                 borderRadius: '50%',
                 backgroundColor:
-                  status === 'connected'
+                  healthStatus === 'connected'
                     ? 'var(--accent-emerald)'
-                    : status === 'checking'
+                    : healthStatus === 'checking'
                     ? 'var(--accent-amber)'
                     : 'var(--accent-rose)',
                 boxShadow:
-                  status === 'connected'
+                  healthStatus === 'connected'
                     ? '0 0 8px var(--accent-emerald)'
-                    : status === 'checking'
-                    ? '0 0 8px var(--accent-amber)'
-                    : '0 0 8px var(--accent-rose)',
+                    : 'none',
               }}
             />
             <span
               style={{
-                fontSize: '0.75rem',
+                fontSize: '0.72rem',
                 fontWeight: 600,
                 color:
-                  status === 'connected'
+                  healthStatus === 'connected'
                     ? 'var(--accent-emerald)'
-                    : status === 'checking'
+                    : healthStatus === 'checking'
                     ? 'var(--accent-amber)'
                     : 'var(--accent-rose)',
-                letterSpacing: '0.05em',
+                letterSpacing: '0.04em',
               }}
             >
-              {status === 'connected'
-                ? 'SYSTEM READY'
-                : status === 'checking'
-                ? 'CONNECTING...'
-                : 'DISCONNECTED'}
+              {healthStatus === 'connected'
+                ? `READY (${latency}ms)`
+                : healthStatus === 'checking'
+                ? 'CHECKING...'
+                : 'OFFLINE'}
             </span>
-          </div>
+          </button>
         </div>
       </header>
 
-      {/* Main Workspace Layout */}
-      <main style={{ flex: 1, padding: '1.5rem 2rem', display: 'flex', flexDirection: 'column', gap: '1.5rem' }}>
-        {/* Verification Status Banner */}
-        <section
+      {/* Diagnostics Drawer (Preserves Phase 1 Health View) */}
+      {showHealthModal && (
+        <div
           style={{
-            backgroundColor: 'var(--bg-secondary)',
-            border: '1px solid var(--border-subtle)',
-            borderRadius: '10px',
-            padding: '1.25rem 1.5rem',
+            backgroundColor: '#0c1322',
+            borderBottom: '1px solid var(--border-subtle)',
+            padding: '0.85rem 1.75rem',
+            fontSize: '0.75rem',
             display: 'flex',
             alignItems: 'center',
             justifyContent: 'space-between',
-            flexWrap: 'wrap',
-            gap: '1rem',
+            fontFamily: 'var(--font-mono)',
+            color: 'var(--text-secondary)',
           }}
         >
-          <div>
-            <h2 style={{ fontSize: '1rem', fontWeight: 600, marginBottom: '0.25rem' }}>
-              Phase 1 Foundation: Frontend-Backend Handshake
-            </h2>
-            <p style={{ fontSize: '0.8rem', color: 'var(--text-secondary)' }}>
-              Verifying live communication between React (Vite/TypeScript) and FastAPI (Python 3.12 / Uvicorn).
-            </p>
+          <div style={{ display: 'flex', gap: '1.5rem', flexWrap: 'wrap' }}>
+            <span>Backend: <strong style={{ color: '#fff' }}>http://127.0.0.1:8000</strong></span>
+            <span>Status: <strong style={{ color: 'var(--accent-emerald)' }}>{health?.status || 'unknown'}</strong></span>
+            <span>Version: <strong style={{ color: 'var(--accent-blue)' }}>{health?.version || '0.2.0'}</strong></span>
+            <span>Environment: <strong>{health?.environment || 'development'}</strong></span>
+            <span>Ping: <strong>{latency}ms</strong></span>
           </div>
           <button
-            onClick={checkHealth}
-            disabled={status === 'checking'}
+            onClick={() => setShowHealthModal(false)}
             style={{
-              padding: '0.5rem 1rem',
-              backgroundColor: '#1e293b',
-              color: 'var(--text-primary)',
-              borderRadius: '6px',
-              border: '1px solid #334155',
-              fontSize: '0.8rem',
-              fontWeight: 500,
-              display: 'flex',
-              alignItems: 'center',
-              gap: '0.5rem',
-              transition: 'background 0.2s',
+              background: 'transparent',
+              color: 'var(--text-muted)',
+              fontSize: '0.85rem',
+              cursor: 'pointer',
             }}
-            onMouseOver={(e) => (e.currentTarget.style.backgroundColor = '#334155')}
-            onMouseOut={(e) => (e.currentTarget.style.backgroundColor = '#1e293b')}
           >
-            <span>↻</span>
-            <span>{status === 'checking' ? 'Testing...' : 'Re-check Connection'}</span>
+            ✕ Close
           </button>
-        </section>
+        </div>
+      )}
 
-        {/* Diagnostic Grid */}
-        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(320px, 1fr))', gap: '1.5rem' }}>
-          {/* Health Details Card */}
-          <div
+      {/* Multimodal Context Bar (Phase 3 & 6 Preview) */}
+      <div
+        style={{
+          backgroundColor: '#0c101a',
+          borderBottom: '1px solid var(--border-subtle)',
+          padding: '0.45rem 1.75rem',
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'space-between',
+          fontSize: '0.73rem',
+          color: 'var(--text-muted)',
+          flexShrink: 0,
+        }}
+      >
+        <div style={{ display: 'flex', alignItems: 'center', gap: '0.6rem' }}>
+          <span>👁 Visual Context:</span>
+          <span style={{ color: 'var(--text-secondary)' }}>None attached (Text troubleshooting active)</span>
+        </div>
+        <div style={{ display: 'flex', gap: '0.5rem' }}>
+          <span
             style={{
-              backgroundColor: 'var(--bg-secondary)',
-              border: '1px solid var(--border-subtle)',
-              borderRadius: '10px',
-              padding: '1.25rem',
-              display: 'flex',
-              flexDirection: 'column',
-              gap: '1rem',
+              padding: '0.15rem 0.45rem',
+              backgroundColor: '#151d2d',
+              borderRadius: '4px',
+              border: '1px dashed #202b3f',
+              fontSize: '0.68rem',
             }}
           >
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-              <span style={{ fontSize: '0.8rem', fontWeight: 600, color: 'var(--text-secondary)', textTransform: 'uppercase' }}>
-                Backend Health Payload
-              </span>
-              <span style={{ fontSize: '0.75rem', fontFamily: 'var(--font-mono)', color: 'var(--text-muted)' }}>
-                {lastChecked ? `Checked at ${lastChecked}` : ''}
-              </span>
-            </div>
-
-            {status === 'connected' && health ? (
-              <div
-                style={{
-                  backgroundColor: 'var(--bg-primary)',
-                  borderRadius: '6px',
-                  padding: '1rem',
-                  border: '1px solid var(--border-subtle)',
-                  fontFamily: 'var(--font-mono)',
-                  fontSize: '0.8rem',
-                  lineHeight: 1.6,
-                }}
-              >
-                <div>
-                  <span style={{ color: 'var(--text-muted)' }}>status: </span>
-                  <span style={{ color: 'var(--accent-emerald)', fontWeight: 600 }}>"{health.status}"</span>
-                </div>
-                <div>
-                  <span style={{ color: 'var(--text-muted)' }}>project: </span>
-                  <span style={{ color: 'var(--accent-cyan)' }}>"{health.project}"</span>
-                </div>
-                <div>
-                  <span style={{ color: 'var(--text-muted)' }}>version: </span>
-                  <span style={{ color: 'var(--accent-blue)' }}>"{health.version}"</span>
-                </div>
-                <div>
-                  <span style={{ color: 'var(--text-muted)' }}>environment: </span>
-                  <span style={{ color: '#e2e8f0' }}>"{health.environment}"</span>
-                </div>
-                <div>
-                  <span style={{ color: 'var(--text-muted)' }}>server_time: </span>
-                  <span style={{ color: 'var(--text-secondary)' }}>"{health.timestamp}"</span>
-                </div>
-              </div>
-            ) : status === 'checking' ? (
-              <div style={{ padding: '2rem', textAlign: 'center', color: 'var(--text-muted)', fontSize: '0.85rem' }}>
-                Probing FastAPI backend...
-              </div>
-            ) : (
-              <div
-                style={{
-                  backgroundColor: 'rgba(244, 63, 94, 0.1)',
-                  border: '1px solid rgba(244, 63, 94, 0.3)',
-                  borderRadius: '6px',
-                  padding: '1rem',
-                  color: 'var(--accent-rose)',
-                  fontSize: '0.85rem',
-                }}
-              >
-                <strong>Connection Error:</strong> {errorMessage}
-              </div>
-            )}
-
-            {/* Architecture checklist */}
-            <div style={{ borderTop: '1px solid var(--border-subtle)', paddingTop: '0.75rem' }}>
-              <div style={{ fontSize: '0.75rem', fontWeight: 600, color: 'var(--text-secondary)', marginBottom: '0.5rem' }}>
-                STACK VERIFICATION CHECKLIST
-              </div>
-              <ul style={{ listStyle: 'none', fontSize: '0.8rem', display: 'flex', flexDirection: 'column', gap: '0.35rem' }}>
-                <li style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
-                  <span style={{ color: 'var(--accent-emerald)' }}>✓</span>
-                  <span>Python 3.12 (via uv managed toolchain)</span>
-                </li>
-                <li style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
-                  <span style={{ color: 'var(--accent-emerald)' }}>✓</span>
-                  <span>FastAPI + Pydantic v2 Backend API</span>
-                </li>
-                <li style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
-                  <span style={{ color: 'var(--accent-emerald)' }}>✓</span>
-                  <span>React 19 + TypeScript + Vite Frontend</span>
-                </li>
-                <li style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
-                  <span style={{ color: status === 'connected' ? 'var(--accent-emerald)' : 'var(--accent-amber)' }}>
-                    {status === 'connected' ? '✓' : '○'}
-                  </span>
-                  <span>Live Frontend-to-Backend HTTP Link</span>
-                </li>
-              </ul>
-            </div>
-          </div>
-
-          {/* Activity / Event Logs */}
-          <div
+            📷 Screenshot Upload (Phase 3)
+          </span>
+          <span
             style={{
-              backgroundColor: 'var(--bg-secondary)',
-              border: '1px solid var(--border-subtle)',
-              borderRadius: '10px',
-              padding: '1.25rem',
-              display: 'flex',
-              flexDirection: 'column',
-              gap: '0.75rem',
+              padding: '0.15rem 0.45rem',
+              backgroundColor: '#151d2d',
+              borderRadius: '4px',
+              border: '1px dashed #202b3f',
+              fontSize: '0.68rem',
             }}
           >
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-              <span style={{ fontSize: '0.8rem', fontWeight: 600, color: 'var(--text-secondary)', textTransform: 'uppercase' }}>
-                System Activity Log
-              </span>
-              <span style={{ fontSize: '0.7rem', color: 'var(--text-muted)' }}>Real-time telemetry</span>
-            </div>
+            🖥 Screen Share (Phase 6)
+          </span>
+        </div>
+      </div>
+
+      {/* Main Conversation Viewport */}
+      <main
+        style={{
+          flex: 1,
+          overflowY: 'auto',
+          padding: '1.25rem 2rem',
+          display: 'flex',
+          flexDirection: 'column',
+        }}
+      >
+        <div style={{ maxWidth: '900px', width: '100%', margin: '0 auto', flex: 1, display: 'flex', flexDirection: 'column' }}>
+          {messages.length === 0 ? (
+            /* Empty State */
             <div
               style={{
                 flex: 1,
-                minHeight: '180px',
-                maxHeight: '260px',
-                overflowY: 'auto',
-                backgroundColor: 'var(--bg-primary)',
-                border: '1px solid var(--border-subtle)',
-                borderRadius: '6px',
-                padding: '0.75rem',
-                fontFamily: 'var(--font-mono)',
-                fontSize: '0.75rem',
                 display: 'flex',
                 flexDirection: 'column',
-                gap: '0.4rem',
+                justifyContent: 'center',
+                alignItems: 'center',
+                textAlign: 'center',
+                padding: '2rem 1rem',
               }}
             >
-              {logs.map((log, index) => (
-                <div key={index} style={{ display: 'flex', gap: '0.5rem' }}>
-                  <span style={{ color: 'var(--text-muted)' }}>[{log.time}]</span>
-                  <span
+              <div
+                style={{
+                  width: '54px',
+                  height: '54px',
+                  borderRadius: '14px',
+                  background: 'linear-gradient(135deg, rgba(2, 132, 199, 0.2) 0%, rgba(6, 182, 212, 0.2) 100%)',
+                  border: '1px solid rgba(6, 182, 212, 0.3)',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  fontSize: '24px',
+                  marginBottom: '1rem',
+                  color: 'var(--accent-cyan)',
+                }}
+              >
+                ⚡
+              </div>
+              <h2 style={{ fontSize: '1.25rem', fontWeight: 600, marginBottom: '0.5rem', color: '#f8fafc' }}>
+                Technical Troubleshooting Engine
+              </h2>
+              <p style={{ fontSize: '0.85rem', color: 'var(--text-secondary)', maxWidth: '520px', lineHeight: 1.6, marginBottom: '2rem' }}>
+                Ask VISTA to diagnose API errors, analyze stack traces, resolve runtime bugs, or inspect system architecture issues.
+              </p>
+
+              {/* Starter Scenarios */}
+              <div style={{ width: '100%', display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(250px, 1fr))', gap: '0.85rem', textAlign: 'left' }}>
+                {QUICK_STARTERS.map((s, idx) => (
+                  <button
+                    key={idx}
+                    onClick={() => sendMessage(s.prompt)}
                     style={{
-                      color:
-                        log.type === 'success'
-                          ? 'var(--accent-emerald)'
-                          : log.type === 'error'
-                          ? 'var(--accent-rose)'
-                          : 'var(--text-secondary)',
+                      backgroundColor: 'var(--bg-secondary)',
+                      border: '1px solid var(--border-subtle)',
+                      borderRadius: '8px',
+                      padding: '0.85rem 1rem',
+                      display: 'flex',
+                      flexDirection: 'column',
+                      gap: '0.35rem',
+                      cursor: 'pointer',
+                      textAlign: 'left',
+                      transition: 'border-color 0.2s, background-color 0.2s',
+                    }}
+                    onMouseOver={(e) => {
+                      e.currentTarget.style.borderColor = 'var(--accent-blue)'
+                      e.currentTarget.style.backgroundColor = 'var(--bg-card)'
+                    }}
+                    onMouseOut={(e) => {
+                      e.currentTarget.style.borderColor = 'var(--border-subtle)'
+                      e.currentTarget.style.backgroundColor = 'var(--bg-secondary)'
                     }}
                   >
-                    {log.msg}
-                  </span>
-                </div>
-              ))}
+                    <span style={{ fontSize: '0.82rem', fontWeight: 600, color: 'var(--accent-cyan)' }}>
+                      {s.title}
+                    </span>
+                    <span style={{ fontSize: '0.73rem', color: 'var(--text-muted)' }}>
+                      {s.subtitle}
+                    </span>
+                  </button>
+                ))}
+              </div>
             </div>
-          </div>
-        </div>
+          ) : (
+            /* Message List */
+            <div style={{ display: 'flex', flexDirection: 'column' }}>
+              {messages.map((m, idx) => (
+                <ChatMessageView key={idx} message={m} modelName={m.role === 'assistant' ? lastModelUsed : undefined} />
+              ))}
 
-        {/* Multimodal Interface Skeleton (Ready for Phase 2 - Phase 6) */}
-        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '1.5rem', flex: 1 }}>
-          {/* Visual Context Panel (Phase 3 placeholder) */}
-          <div
-            style={{
-              backgroundColor: 'var(--bg-secondary)',
-              border: '1px dashed var(--border-subtle)',
-              borderRadius: '10px',
-              padding: '1.5rem',
-              display: 'flex',
-              flexDirection: 'column',
-              alignItems: 'center',
-              justifyContent: 'center',
-              gap: '0.75rem',
-              textAlign: 'center',
-              minHeight: '200px',
-            }}
-          >
-            <div style={{ fontSize: '2rem' }}>🖥</div>
-            <div style={{ fontWeight: 600, fontSize: '0.9rem' }}>Visual Context Viewport</div>
-            <p style={{ fontSize: '0.75rem', color: 'var(--text-muted)', maxWidth: '300px' }}>
-              Screenshots, screen sharing, and technical diagrams will be rendered here for multimodal AI analysis.
-            </p>
-            <span
-              style={{
-                fontSize: '0.65rem',
-                padding: '0.2rem 0.5rem',
-                backgroundColor: '#1e293b',
-                color: 'var(--accent-cyan)',
-                borderRadius: '4px',
-                border: '1px solid #334155',
-              }}
-            >
-              Activates in Phase 3
-            </span>
-          </div>
+              {/* Thinking / Analyzing Indicator */}
+              {loading && (
+                <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem', margin: '1rem 0' }}>
+                  <div
+                    style={{
+                      width: '24px',
+                      height: '24px',
+                      borderRadius: '6px',
+                      background: 'linear-gradient(135deg, #0284c7 0%, #06b6d4 100%)',
+                      display: 'flex',
+                      alignItems: 'center',
+                      justifyContent: 'center',
+                      fontWeight: 700,
+                      fontSize: '12px',
+                      color: '#ffffff',
+                    }}
+                  >
+                    V
+                  </div>
+                  <div
+                    style={{
+                      display: 'flex',
+                      alignItems: 'center',
+                      gap: '0.5rem',
+                      padding: '0.65rem 1rem',
+                      backgroundColor: 'var(--bg-secondary)',
+                      border: '1px solid var(--border-subtle)',
+                      borderRadius: '8px',
+                      fontSize: '0.8rem',
+                      color: 'var(--accent-cyan)',
+                      fontFamily: 'var(--font-mono)',
+                    }}
+                  >
+                    <span
+                      style={{
+                        display: 'inline-block',
+                        width: '8px',
+                        height: '8px',
+                        borderRadius: '50%',
+                        backgroundColor: 'var(--accent-cyan)',
+                        animation: 'pulse 1.5s infinite',
+                      }}
+                    />
+                    <span>VISTA is analyzing the technical context...</span>
+                  </div>
+                </div>
+              )}
 
-          {/* Conversation Panel (Phase 2 & 4 placeholder) */}
-          <div
-            style={{
-              backgroundColor: 'var(--bg-secondary)',
-              border: '1px dashed var(--border-subtle)',
-              borderRadius: '10px',
-              padding: '1.5rem',
-              display: 'flex',
-              flexDirection: 'column',
-              alignItems: 'center',
-              justifyContent: 'center',
-              gap: '0.75rem',
-              textAlign: 'center',
-              minHeight: '200px',
-            }}
-          >
-            <div style={{ fontSize: '2rem' }}>💬</div>
-            <div style={{ fontWeight: 600, fontSize: '0.9rem' }}>Technical Troubleshooting Dialogue</div>
-            <p style={{ fontSize: '0.75rem', color: 'var(--text-muted)', maxWidth: '300px' }}>
-              Natural language technical reasoning, follow-ups, and tool verification traces will appear here.
-            </p>
-            <span
-              style={{
-                fontSize: '0.65rem',
-                padding: '0.2rem 0.5rem',
-                backgroundColor: '#1e293b',
-                color: 'var(--accent-cyan)',
-                borderRadius: '4px',
-                border: '1px solid #334155',
-              }}
-            >
-              Activates in Phase 2
-            </span>
-          </div>
+              {/* Error Banner */}
+              {error && (
+                <div
+                  style={{
+                    backgroundColor: 'rgba(244, 63, 94, 0.1)',
+                    border: '1px solid rgba(244, 63, 94, 0.35)',
+                    borderRadius: '8px',
+                    padding: '0.85rem 1.15rem',
+                    margin: '1rem 0',
+                    color: 'var(--accent-rose)',
+                    fontSize: '0.82rem',
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'space-between',
+                  }}
+                >
+                  <div>
+                    <strong>Diagnostic Error:</strong> {error}
+                  </div>
+                  <button
+                    onClick={() => sendMessage(messages[messages.length - 1]?.content)}
+                    style={{
+                      padding: '0.3rem 0.75rem',
+                      backgroundColor: 'rgba(244, 63, 94, 0.2)',
+                      color: 'var(--accent-rose)',
+                      borderRadius: '4px',
+                      border: '1px solid rgba(244, 63, 94, 0.4)',
+                      fontSize: '0.75rem',
+                      cursor: 'pointer',
+                      fontWeight: 600,
+                    }}
+                  >
+                    Retry
+                  </button>
+                </div>
+              )}
+
+              <div ref={messagesEndRef} />
+            </div>
+          )}
         </div>
       </main>
 
-      {/* Persistent Bottom Status & Controls Bar */}
+      {/* Input Dock */}
       <footer
         style={{
           borderTop: '1px solid var(--border-subtle)',
           backgroundColor: 'var(--bg-secondary)',
           padding: '0.85rem 2rem',
-          display: 'flex',
-          alignItems: 'center',
-          justifyContent: 'space-between',
+          flexShrink: 0,
         }}
       >
-        <div style={{ display: 'flex', alignItems: 'center', gap: '1rem' }}>
-          <span style={{ fontSize: '0.75rem', color: 'var(--text-muted)', textTransform: 'uppercase' }}>
-            Agent State:
-          </span>
-          <span
+        <div style={{ maxWidth: '900px', margin: '0 auto', display: 'flex', flexDirection: 'column', gap: '0.5rem' }}>
+          <div
             style={{
-              fontSize: '0.75rem',
-              fontFamily: 'var(--font-mono)',
-              padding: '0.15rem 0.5rem',
-              backgroundColor: '#1e293b',
-              borderRadius: '4px',
-              color: status === 'connected' ? 'var(--accent-emerald)' : 'var(--text-muted)',
+              display: 'flex',
+              alignItems: 'flex-end',
+              backgroundColor: 'var(--bg-primary)',
+              border: '1px solid var(--border-subtle)',
+              borderRadius: '10px',
+              padding: '0.65rem 0.85rem',
+              transition: 'border-color 0.2s',
+            }}
+            onFocus={() => {
+              const dock = textareaRef.current?.parentElement
+              if (dock) dock.style.borderColor = 'var(--border-active)'
+            }}
+            onBlur={() => {
+              const dock = textareaRef.current?.parentElement
+              if (dock) dock.style.borderColor = 'var(--border-subtle)'
             }}
           >
-            {status === 'connected' ? '● IDLE (READY)' : '○ INITIALIZING'}
-          </span>
-        </div>
+            <textarea
+              ref={textareaRef}
+              rows={2}
+              value={input}
+              onChange={(e) => setInput(e.target.value)}
+              onKeyDown={handleKeyDown}
+              disabled={loading}
+              placeholder="Describe the bug, paste an error traceback, or ask a technical diagnostic question..."
+              style={{
+                flex: 1,
+                backgroundColor: 'transparent',
+                border: 'none',
+                outline: 'none',
+                color: 'var(--text-primary)',
+                fontFamily: 'inherit',
+                fontSize: '0.88rem',
+                lineHeight: 1.5,
+                resize: 'none',
+                minHeight: '44px',
+                maxHeight: '180px',
+              }}
+            />
+            <button
+              onClick={() => sendMessage()}
+              disabled={!input.trim() || loading}
+              style={{
+                marginLeft: '0.75rem',
+                padding: '0.55rem 1rem',
+                backgroundColor: input.trim() && !loading ? 'var(--accent-blue)' : '#1e293b',
+                color: input.trim() && !loading ? '#ffffff' : 'var(--text-muted)',
+                borderRadius: '6px',
+                fontSize: '0.82rem',
+                fontWeight: 600,
+                display: 'flex',
+                alignItems: 'center',
+                gap: '0.4rem',
+                cursor: input.trim() && !loading ? 'pointer' : 'not-allowed',
+                transition: 'background 0.2s',
+              }}
+            >
+              <span>{loading ? 'Analyzing...' : 'Send'}</span>
+              <span>↵</span>
+            </button>
+          </div>
 
-        <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem' }}>
-          <button
-            disabled
-            style={{
-              padding: '0.4rem 0.8rem',
-              borderRadius: '6px',
-              backgroundColor: '#1e293b',
-              color: 'var(--text-muted)',
-              fontSize: '0.75rem',
-              opacity: 0.6,
-              cursor: 'not-allowed',
-            }}
-          >
-            🎙 Voice (Phase 5)
-          </button>
-          <button
-            disabled
-            style={{
-              padding: '0.4rem 0.8rem',
-              borderRadius: '6px',
-              backgroundColor: '#1e293b',
-              color: 'var(--text-muted)',
-              fontSize: '0.75rem',
-              opacity: 0.6,
-              cursor: 'not-allowed',
-            }}
-          >
-            🖥 Share Screen (Phase 6)
-          </button>
-          <button
-            disabled
-            style={{
-              padding: '0.4rem 0.8rem',
-              borderRadius: '6px',
-              backgroundColor: '#1e293b',
-              color: 'var(--text-muted)',
-              fontSize: '0.75rem',
-              opacity: 0.6,
-              cursor: 'not-allowed',
-            }}
-          >
-            📎 Upload (Phase 3)
-          </button>
+          {/* Input helper & Voice/Vision hints */}
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', fontSize: '0.7rem', color: 'var(--text-muted)' }}>
+            <span>Enter ↵ to send · Shift+Enter for new line</span>
+            <div style={{ display: 'flex', gap: '0.75rem' }}>
+              <span>🎙 Voice (Phase 5)</span>
+              <span>📎 Vision (Phase 3)</span>
+              <span>⚡ Controlled Tools (Phase 7)</span>
+            </div>
+          </div>
         </div>
       </footer>
     </div>
