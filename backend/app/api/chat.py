@@ -28,12 +28,12 @@ async def send_chat_message(request: ChatRequest) -> ChatResponse:
             detail="The messages array cannot be empty.",
         )
 
-    # Validate that the last message is from the user
+    # Validate that the last message is from the user or tool
     last_msg = request.messages[-1]
-    if last_msg.role != "user":
+    if last_msg.role not in ("user", "tool"):
         raise HTTPException(
             status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
-            detail="The final message in the conversation history must be from the 'user'.",
+            detail="The final message in the conversation history must be from the 'user' or 'tool'.",
         )
 
     # Validate and sanitize all visual attachments in conversation history
@@ -65,7 +65,6 @@ async def send_chat_message(request: ChatRequest) -> ChatResponse:
 
     provider = get_llm_provider()
 
-
     try:
         response_text, model_used, finish_reason = await provider.generate_response(
             messages=request.messages,
@@ -74,10 +73,17 @@ async def send_chat_message(request: ChatRequest) -> ChatResponse:
             model=request.model,
         )
 
+        from app.services.tools.parser import extract_tool_calls
+        clean_text, tool_calls, parsed_reason = extract_tool_calls(response_text)
+        if tool_calls:
+            finish_reason = "tool_calls"
+            response_text = clean_text or "I have requested a diagnostic tool to investigate."
+
         return ChatResponse(
             message=ChatMessage(
                 role="assistant",
                 content=response_text,
+                tool_calls=tool_calls,
                 timestamp=datetime.now(timezone.utc).isoformat(),
             ),
             provider=provider.provider_name,

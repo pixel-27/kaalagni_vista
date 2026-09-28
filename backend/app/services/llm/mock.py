@@ -23,11 +23,154 @@ class MockProvider(BaseLLMProvider):
         if not messages:
             return "No input provided. Please share the technical problem or error you are diagnosing.", target_model, "stop"
 
+        # 1. Check if the conversation has a recent tool result
+        last_tool_msg = next((m for m in reversed(messages) if m.role == "tool"), None)
+        if last_tool_msg and last_tool_msg.tool_result:
+            tr = last_tool_msg.tool_result
+            if tr.status == "denied":
+                response = (
+                    "### Diagnostic Assessment: Tool Execution Canceled\n\n"
+                    f"Understood. The diagnostic test execution (`{tr.tool}`) was canceled by the user.\n\n"
+                    "**Alternative Verification Options:**\n"
+                    "- You can run the test suite manually in your terminal if you prefer: `pytest -v` (backend) or `npm test` (frontend).\n"
+                    "- Or share the error traceback or code snippet directly, and I will inspect it without executing tests."
+                )
+                return response, target_model, "stop"
+
+            if tr.tool == "read_file" and tr.output:
+                path = tr.output.get("path", "file")
+                start = tr.output.get("start_line", 1)
+                end = tr.output.get("end_line", 0)
+                tot = tr.output.get("total_lines", 0)
+                response = (
+                    f"### Diagnostic Analysis: Inspected `{path}`\n\n"
+                    f"I have inspected lines {start} to {end} (out of {tot} lines in `{path}`):\n\n"
+                    "- File read successfully within the workspace sandbox.\n"
+                    "- Reviewed the implementation logic and request handling.\n\n"
+                    "**Recommendation:**\n"
+                    "The inspected module structure is consistent with the project architecture. Let me know if you would like me to inspect another section or run tests."
+                )
+                return response, target_model, "stop"
+
+            if tr.tool == "search_code" and tr.output:
+                q = tr.output.get("query", "")
+                tot = tr.output.get("total_matches", 0)
+                sp = tr.output.get("search_path", ".")
+                response = (
+                    f"### Diagnostic Analysis: Search Results for `{q}`\n\n"
+                    f"Completed Python-level search across `{sp}`. Found **{tot}** match(es).\n\n"
+                    "**Matches Summary:**\n"
+                    f"The symbol `{q}` was located in the project source files. You can inspect the relevant file lines to trace definitions and usages."
+                )
+                return response, target_model, "stop"
+
+            if tr.tool == "analyze_error" and tr.output:
+                err_type = tr.output.get("error_type", "Error")
+                cat = tr.output.get("category", "general_error")
+                summary = tr.output.get("summary", "")
+                action = tr.output.get("suggested_action", "")
+                lf = tr.output.get("likely_file")
+                ll = tr.output.get("likely_line")
+                location_note = f" at `{lf}:{ll}`" if lf else ""
+                response = (
+                    f"### Diagnostic Analysis: Error Telemetry\n\n"
+                    f"**Parsed Failure:** `{summary}`{location_note}\n\n"
+                    f"- **Category**: `{cat}`\n"
+                    f"- **Diagnostic Next Step**: {action}\n\n"
+                    "Would you like me to inspect the relevant code file or verify with a test?"
+                )
+                return response, target_model, "stop"
+
+            if tr.tool == "run_test" and tr.output:
+                target_name = tr.output.get("target_name", "Test Target")
+                target_id = tr.output.get("test_target", "")
+                exit_code = tr.output.get("exit_code", -1)
+                dur = tr.output.get("duration_seconds", 0.0)
+                status_label = "PASSED (Clean)" if exit_code == 0 else f"FAILED (Exit code {exit_code})"
+                response = (
+                    f"### Diagnostic Verification: {target_name}\n\n"
+                    f"**Target**: `{target_id}` | **Result**: {status_label} | **Duration**: {dur}s\n\n"
+                    f"{'All tests completed successfully with zero regressions.' if exit_code == 0 else 'The test target reported failures. See the tool output details above to isolate the failing tests.'}"
+                )
+                return response, target_model, "stop"
+
         last_user_msg_obj = next((m for m in reversed(messages) if m.role == "user"), None)
         last_user_msg = last_user_msg_obj.content.lower() if last_user_msg_obj else ""
         full_conversation = " ".join([m.content.lower() for m in messages])
 
-        # Multimodal Turn: Current message contains visual attachments
+        # 2. Check for explicit tool trigger phrases from the user
+        if "read_file" in last_user_msg or "read file" in last_user_msg or "inspect file" in last_user_msg or "inspect the file" in last_user_msg:
+            target_path = "backend/app/api/chat.py"
+            if "main.py" in last_user_msg:
+                target_path = "backend/app/main.py"
+            response = (
+                f"I need to inspect `{target_path}` to check the code implementation.\n\n"
+                "```json\n"
+                "{\n"
+                '  "type": "tool_request",\n'
+                '  "tool": "read_file",\n'
+                '  "arguments": {\n'
+                f'    "path": "{target_path}",\n'
+                '    "start_line": 1,\n'
+                '    "end_line": 50\n'
+                '  }\n'
+                "}\n"
+                "```"
+            )
+            return response, target_model, "tool_calls"
+
+        if "search_code" in last_user_msg or "search code" in last_user_msg or "search the codebase" in last_user_msg or "search for" in last_user_msg:
+            q = "CORSMiddleware"
+            if "keyerror" in last_user_msg:
+                q = "KeyError"
+            elif "chatrequest" in last_user_msg:
+                q = "ChatRequest"
+            response = (
+                f"I will search the project workspace for `{q}`.\n\n"
+                "```json\n"
+                "{\n"
+                '  "type": "tool_request",\n'
+                '  "tool": "search_code",\n'
+                '  "arguments": {\n'
+                f'    "query": "{q}",\n'
+                '    "max_results": 20\n'
+                '  }\n'
+                "}\n"
+                "```"
+            )
+            return response, target_model, "tool_calls"
+
+        if "analyze_error" in last_user_msg or "analyze error" in last_user_msg or "analyze this error" in last_user_msg or ("parse" in last_user_msg and "traceback" in last_user_msg):
+            response = (
+                "I will parse and analyze this stack trace using the diagnostic analyzer.\n\n"
+                "```json\n"
+                "{\n"
+                '  "type": "tool_request",\n'
+                '  "tool": "analyze_error",\n'
+                '  "arguments": {\n'
+                '    "error_text": "KeyError: \'user_id\'\\n  File \\"backend/app/api/chat.py\\", line 45, in send_chat_message\\n    return data[\'user_id\']"\n'
+                '  }\n'
+                "}\n"
+                "```"
+            )
+            return response, target_model, "tool_calls"
+
+        if "run_test" in last_user_msg or "run test" in last_user_msg or "run backend tests" in last_user_msg or "verify by running tests" in last_user_msg or "run the tests" in last_user_msg:
+            response = (
+                "I recommend running the backend tests to verify project health.\n\n"
+                "```json\n"
+                "{\n"
+                '  "type": "tool_request",\n'
+                '  "tool": "run_test",\n'
+                '  "arguments": {\n'
+                '    "test_target": "backend_tests"\n'
+                '  }\n'
+                "}\n"
+                "```"
+            )
+            return response, target_model, "tool_calls"
+
+        # 3. Multimodal Turn: Current message contains visual attachments
         if last_user_msg_obj and last_user_msg_obj.attachments:
             num_att = len(last_user_msg_obj.attachments)
             att_types = ", ".join(a.mime_type for a in last_user_msg_obj.attachments)

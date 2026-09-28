@@ -1,8 +1,9 @@
 from typing import Literal, Optional, List
 from pydantic import BaseModel, Field
 from datetime import datetime, timezone
+from app.models.tools import ToolCall, ToolResult
 
-Role = Literal["user", "assistant", "system"]
+Role = Literal["user", "assistant", "system", "tool"]
 
 class ImageAttachment(BaseModel):
     mime_type: str = Field(..., description="Image MIME type (image/png, image/jpeg, image/webp)")
@@ -16,7 +17,7 @@ class ImageAttachment(BaseModel):
 
 class ChatMessage(BaseModel):
     role: Role
-    content: str = Field(..., min_length=1, max_length=50000, description="Message text content")
+    content: str = Field(default="", max_length=50000, description="Message text content")
     attachments: Optional[List[ImageAttachment]] = Field(
         default=None,
         description="Optional visual attachments associated with this turn",
@@ -24,6 +25,18 @@ class ChatMessage(BaseModel):
     input_mode: Optional[Literal["text", "voice"]] = Field(
         default="text",
         description="Input modality: 'text' or 'voice'",
+    )
+    tool_calls: Optional[List[ToolCall]] = Field(
+        default=None,
+        description="Optional list of controlled tool calls requested by the assistant",
+    )
+    tool_call_id: Optional[str] = Field(
+        default=None,
+        description="Referenced tool call ID when role is 'tool'",
+    )
+    tool_result: Optional[ToolResult] = Field(
+        default=None,
+        description="Structured tool execution result when role is 'tool'",
     )
     timestamp: Optional[str] = Field(default_factory=lambda: datetime.now(timezone.utc).isoformat())
 
@@ -43,4 +56,5 @@ class ChatResponse(BaseModel):
     provider: str = Field(..., description="LLM provider that serviced the request")
     model: str = Field(..., description="Model identifier used")
     timestamp: str = Field(default_factory=lambda: datetime.now(timezone.utc).isoformat())
-    finish_reason: Optional[str] = Field("stop", description="Reason model stopped generating")
+    finish_reason: Optional[str] = Field("stop", description="Reason model stopped generating ('stop' or 'tool_calls')")
+

@@ -1,4 +1,30 @@
-export type Role = 'user' | 'assistant' | 'system'
+export type Role = 'user' | 'assistant' | 'system' | 'tool'
+
+export type ToolPermissionLevel = 'read_only' | 'execution'
+
+export interface ToolDefinition {
+  name: string
+  description: string
+  permission_level: ToolPermissionLevel
+  requires_confirmation: boolean
+  parameters: Record<string, unknown>
+}
+
+export interface ToolCall {
+  id: string
+  tool: string
+  arguments: Record<string, unknown>
+}
+
+export interface ToolResult {
+  call_id: string
+  tool: string
+  status: 'success' | 'error' | 'denied'
+  output?: unknown
+  error?: string
+  permission_level?: ToolPermissionLevel
+  duration_seconds?: number
+}
 
 export interface ImageAttachment {
   mime_type: string
@@ -26,10 +52,11 @@ export interface ChatMessage {
   content: string
   attachments?: ImageAttachment[]
   input_mode?: InputMode
+  tool_calls?: ToolCall[]
+  tool_call_id?: string
+  tool_result?: ToolResult
   timestamp?: string
 }
-
-
 
 export interface ChatResponse {
   message: ChatMessage
@@ -37,6 +64,17 @@ export interface ChatResponse {
   model: string
   timestamp: string
   finish_reason?: string
+}
+
+export interface ToolExecuteRequest {
+  call_id: string
+  tool: string
+  arguments: Record<string, unknown>
+  user_approved: boolean
+}
+
+export interface ToolExecuteResponse {
+  result: ToolResult
 }
 
 export interface HealthData {

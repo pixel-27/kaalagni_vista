@@ -9,6 +9,7 @@ import type {
   VoicePlaybackState,
   InputMode,
   ScreenCaptureState,
+  ToolCall,
 } from './types'
 import {
   VoiceRecognitionController,
@@ -20,6 +21,8 @@ import {
   ScreenCaptureController,
   isScreenCaptureSupported,
 } from './services/screen'
+import { executeTool } from './services/tools'
+
 
 const QUICK_STARTERS = [
   {
@@ -80,6 +83,14 @@ export default function App() {
   const [autoSpeak, setAutoSpeak] = useState(false)
   const [currentlySpeakingText, setCurrentlySpeakingText] = useState<string | null>(null)
   const [lastInputMode, setLastInputMode] = useState<InputMode>('text')
+
+  // Controlled Diagnostic Tools state (Phase 6)
+  const [pendingToolCall, setPendingToolCall] = useState<ToolCall | null>(null)
+  const [activeToolActivity, setActiveToolActivity] = useState<{
+    tool: string
+    status: 'running' | 'completed' | 'denied' | 'error'
+    label?: string
+  } | null>(null)
 
   // Health telemetry state (preserved from Phase 1)
   const [health, setHealth] = useState<HealthData | null>(null)
@@ -305,51 +316,9 @@ export default function App() {
     }
 
     try {
-      let res: Response
-      const payload = {
-        messages: updatedHistory.map((m) => ({
-          role: m.role,
-          content: m.content,
-          attachments: m.attachments,
-          input_mode: m.input_mode,
-        })),
-      }
-
-      try {
-        res = await fetch('/api/chat', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify(payload),
-        })
-      } catch {
-        res = await fetch('http://127.0.0.1:8000/api/chat', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify(payload),
-        })
-      }
-
-      if (!res.ok) {
-        let errDetail = `Server returned HTTP ${res.status}: ${res.statusText}`
-        try {
-          const errData = await res.json()
-          if (errData.detail) errDetail = errData.detail
-        } catch {
-          // ignore json parse error
-        }
-        throw new Error(errDetail)
-      }
-
+      const data = await dispatchChatTurn(updatedHistory)
       setDiagnosticState('responding')
-      const data: ChatResponse = await res.json()
-      setMessages([...updatedHistory, data.message])
-      setLastModelUsed(`${data.provider} · ${data.model}`)
-
-      // Auto-read response aloud if enabled
-      if (autoSpeak && data.message.content) {
-        synthesisRef.current?.speak(data.message.content)
-        setCurrentlySpeakingText(data.message.content)
-      }
+      await handleChatResponse(data, updatedHistory)
     } catch (err: unknown) {
       const msg = err instanceof Error ? err.message : 'Failed to communicate with VISTA backend'
       setError(msg)
@@ -357,6 +326,164 @@ export default function App() {
       setLoading(false)
       setDiagnosticState('idle')
       setTimeout(() => textareaRef.current?.focus(), 50)
+    }
+  }
+
+  const dispatchChatTurn = async (chatHistory: ChatMessage[]): Promise<ChatResponse> => {
+    let res: Response
+    const payload = {
+      messages: chatHistory.map((m) => ({
+        role: m.role,
+        content: m.content,
+        attachments: m.attachments,
+        input_mode: m.input_mode,
+        tool_calls: m.tool_calls,
+        tool_call_id: m.tool_call_id,
+        tool_result: m.tool_result,
+      })),
+    }
+
+    try {
+      res = await fetch('/api/chat', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload),
+      })
+    } catch {
+      res = await fetch('http://127.0.0.1:8000/api/chat', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload),
+      })
+    }
+
+    if (!res.ok) {
+      let errDetail = `Server returned HTTP ${res.status}: ${res.statusText}`
+      try {
+        const errData = await res.json()
+        if (errData.detail) errDetail = errData.detail
+      } catch {
+        // ignore
+      }
+      throw new Error(errDetail)
+    }
+
+    return res.json()
+  }
+
+  const handleChatResponse = async (data: ChatResponse, currentHistory: ChatMessage[]) => {
+    const nextHistory = [...currentHistory, data.message]
+    setMessages(nextHistory)
+    setLastModelUsed(`${data.provider} · ${data.model}`)
+
+    // Check if assistant requested controlled diagnostic tool(s)
+    if (data.message.tool_calls && data.message.tool_calls.length > 0) {
+      const toolCall = data.message.tool_calls[0]
+      if (toolCall.tool === 'run_test') {
+        // Execution tool requires explicit user confirmation
+        setPendingToolCall(toolCall)
+        setActiveToolActivity({
+          tool: toolCall.tool,
+          status: 'running',
+          label: `Awaiting user approval to run test: ${String(toolCall.arguments.test_target || '')}`,
+        })
+      } else {
+        // Read-only tool: execute automatically
+        await executeReadOnlyTool(toolCall, nextHistory)
+      }
+    } else {
+      setActiveToolActivity(null)
+      if (autoSpeak && data.message.content) {
+        synthesisRef.current?.speak(data.message.content)
+        setCurrentlySpeakingText(data.message.content)
+      }
+    }
+  }
+
+  const executeReadOnlyTool = async (call: ToolCall, historySoFar: ChatMessage[]) => {
+    setActiveToolActivity({
+      tool: call.tool,
+      status: 'running',
+      label: `Executing ${call.tool}...`,
+    })
+
+    try {
+      const toolRes = await executeTool({
+        call_id: call.id,
+        tool: call.tool,
+        arguments: call.arguments,
+        user_approved: true,
+      })
+
+      const toolMsg: ChatMessage = {
+        role: 'tool',
+        content: typeof toolRes.output === 'string' ? toolRes.output : JSON.stringify(toolRes.output || toolRes.error || ''),
+        tool_call_id: call.id,
+        tool_result: toolRes,
+        timestamp: new Date().toISOString(),
+      }
+
+      const updatedHistory = [...historySoFar, toolMsg]
+      setMessages(updatedHistory)
+      setActiveToolActivity({
+        tool: call.tool,
+        status: toolRes.status === 'success' ? 'completed' : 'error',
+        label: toolRes.status === 'success' ? `✅ ${call.tool} completed` : `❌ ${call.tool} error`,
+      })
+
+      // Dispatch follow-up to LLM so VISTA analyzes the tool result
+      setLoading(true)
+      setDiagnosticState('analyzing')
+      const followUpData = await dispatchChatTurn(updatedHistory)
+      await handleChatResponse(followUpData, updatedHistory)
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : 'Tool execution failed'
+      setError(msg)
+      setActiveToolActivity(null)
+    } finally {
+      setLoading(false)
+      setDiagnosticState('idle')
+    }
+  }
+
+  const handleConfirmToolExecution = async (call: ToolCall, approved: boolean) => {
+    setPendingToolCall(null)
+    setActiveToolActivity({
+      tool: call.tool,
+      status: approved ? 'running' : 'denied',
+      label: approved ? `Running approved test target: ${String(call.arguments.test_target || '')}...` : 'Test execution denied by user',
+    })
+
+    setLoading(true)
+    try {
+      const toolRes = await executeTool({
+        call_id: call.id,
+        tool: call.tool,
+        arguments: call.arguments,
+        user_approved: approved,
+      })
+
+      const toolMsg: ChatMessage = {
+        role: 'tool',
+        content: approved ? 'Test executed successfully.' : 'Execution denied by user.',
+        tool_call_id: call.id,
+        tool_result: toolRes,
+        timestamp: new Date().toISOString(),
+      }
+
+      const updatedHistory = [...messages, toolMsg]
+      setMessages(updatedHistory)
+
+      // Dispatch follow-up to LLM
+      setDiagnosticState('analyzing')
+      const followUpData = await dispatchChatTurn(updatedHistory)
+      await handleChatResponse(followUpData, updatedHistory)
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : 'Failed to execute tool'
+      setError(msg)
+    } finally {
+      setLoading(false)
+      setDiagnosticState('idle')
     }
   }
 
@@ -981,6 +1108,145 @@ export default function App() {
             </div>
           )}
 
+          {/* Phase 6: Diagnostic Tool Confirmation Card (for execution tools like run_test) */}
+          {pendingToolCall && (
+            <div
+              style={{
+                display: 'flex',
+                flexDirection: 'column',
+                gap: '0.65rem',
+                padding: '0.9rem 1.15rem',
+                backgroundColor: 'rgba(167, 139, 250, 0.12)',
+                border: '1px solid rgba(167, 139, 250, 0.5)',
+                borderRadius: '10px',
+                boxShadow: '0 4px 16px rgba(0, 0, 0, 0.35)',
+              }}
+            >
+              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                <span style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', fontWeight: 600, color: '#f1f5f9', fontSize: '0.86rem' }}>
+                  <span>🧪</span>
+                  <span>VISTA requests permission to execute diagnostic test:</span>
+                </span>
+                <span
+                  style={{
+                    fontSize: '0.68rem',
+                    fontFamily: 'var(--font-mono)',
+                    padding: '0.15rem 0.5rem',
+                    borderRadius: '4px',
+                    backgroundColor: 'rgba(245, 158, 11, 0.25)',
+                    color: '#fbbf24',
+                    border: '1px solid rgba(245, 158, 11, 0.45)',
+                    fontWeight: 600,
+                  }}
+                >
+                  REQUIRES CONFIRMATION
+                </span>
+              </div>
+
+              <div
+                style={{
+                  fontSize: '0.8rem',
+                  color: '#cbd5e1',
+                  backgroundColor: 'rgba(0, 0, 0, 0.35)',
+                  padding: '0.55rem 0.85rem',
+                  borderRadius: '6px',
+                  border: '1px solid rgba(255, 255, 255, 0.08)',
+                  display: 'flex',
+                  flexDirection: 'column',
+                  gap: '0.25rem',
+                  fontFamily: 'var(--font-mono)',
+                }}
+              >
+                <div>
+                  <span style={{ color: 'var(--text-muted)' }}>Target: </span>
+                  <strong style={{ color: 'var(--accent-cyan)' }}>{String(pendingToolCall.arguments.test_target || '')}</strong>
+                </div>
+                <div>
+                  <span style={{ color: 'var(--text-muted)' }}>Scope: </span>
+                  <span>Allowlisted project test suite execution within workspace sandbox</span>
+                </div>
+              </div>
+
+              <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem', marginTop: '0.2rem' }}>
+                <button
+                  type="button"
+                  onClick={() => handleConfirmToolExecution(pendingToolCall, true)}
+                  disabled={loading}
+                  style={{
+                    display: 'inline-flex',
+                    alignItems: 'center',
+                    gap: '0.4rem',
+                    padding: '0.45rem 1rem',
+                    backgroundColor: 'rgba(16, 185, 129, 0.22)',
+                    border: '1px solid #10b981',
+                    color: '#34d399',
+                    borderRadius: '6px',
+                    fontWeight: 600,
+                    fontSize: '0.82rem',
+                    cursor: loading ? 'not-allowed' : 'pointer',
+                    transition: 'all 0.2s',
+                  }}
+                >
+                  <span>✓</span>
+                  <span>Allow & Run Test</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => handleConfirmToolExecution(pendingToolCall, false)}
+                  disabled={loading}
+                  style={{
+                    display: 'inline-flex',
+                    alignItems: 'center',
+                    gap: '0.4rem',
+                    padding: '0.45rem 0.95rem',
+                    backgroundColor: 'rgba(239, 68, 68, 0.15)',
+                    border: '1px solid rgba(239, 68, 68, 0.45)',
+                    color: '#f87171',
+                    borderRadius: '6px',
+                    fontWeight: 600,
+                    fontSize: '0.82rem',
+                    cursor: loading ? 'not-allowed' : 'pointer',
+                    transition: 'all 0.2s',
+                  }}
+                >
+                  <span>✕</span>
+                  <span>Deny</span>
+                </button>
+              </div>
+            </div>
+          )}
+
+          {/* Phase 6: Active Tool Activity Banner */}
+          {activeToolActivity && (
+            <div
+              style={{
+                display: 'flex',
+                alignItems: 'center',
+                gap: '0.65rem',
+                padding: '0.5rem 0.85rem',
+                backgroundColor:
+                  activeToolActivity.status === 'running'
+                    ? 'rgba(167, 139, 250, 0.15)'
+                    : activeToolActivity.status === 'completed'
+                    ? 'rgba(16, 185, 129, 0.15)'
+                    : 'rgba(245, 158, 11, 0.15)',
+                border: `1px solid ${
+                  activeToolActivity.status === 'running'
+                    ? 'rgba(167, 139, 250, 0.45)'
+                    : activeToolActivity.status === 'completed'
+                    ? 'rgba(16, 185, 129, 0.4)'
+                    : 'rgba(245, 158, 11, 0.4)'
+                }`,
+                borderRadius: '8px',
+                fontSize: '0.8rem',
+                color: '#f1f5f9',
+              }}
+            >
+              <span>{activeToolActivity.tool === 'read_file' ? '📄' : activeToolActivity.tool === 'search_code' ? '🔍' : activeToolActivity.tool === 'analyze_error' ? '🩺' : '🧪'}</span>
+              <span>{activeToolActivity.label || `Running ${activeToolActivity.tool}...`}</span>
+            </div>
+          )}
+
           {/* Screen Requesting Permission / Capturing Banner */}
           {(screenState === 'requesting_permission' || screenState === 'capturing') && (
             <div
@@ -1394,7 +1660,7 @@ export default function App() {
               >
                 {pendingAttachment?.source === 'screen' ? '🖥️ Screen Active' : '🖥️ Screen Ready'}
               </span>
-              <span>⚡ Controlled Tools (Phase 6)</span>
+              <span style={{ color: '#a78bfa', fontWeight: 600 }}>⚡ Controlled Tools Ready (Phase 6)</span>
             </div>
           </div>
         </div>
