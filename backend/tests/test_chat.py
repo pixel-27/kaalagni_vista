@@ -471,3 +471,153 @@ async def test_chat_invalid_input_mode_rejected():
     assert res.status_code == 422
 
 
+@pytest.mark.asyncio
+async def test_chat_screen_source_attachment_accepted():
+    """Chat endpoint accepts screen context snapshot attachments with source='screen'."""
+    with patch("app.api.chat.get_llm_provider", return_value=MockProvider()):
+        async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+            res = await client.post(
+                "/api/chat",
+                json={
+                    "messages": [
+                        {
+                            "role": "user",
+                            "content": "VISTA, look at what's on my screen and tell me why this error is happening.",
+                            "attachments": [
+                                {
+                                    "mime_type": "image/png",
+                                    "data": VALID_PNG_B64,
+                                    "filename": "screen_snapshot_1711600000.png",
+                                    "source": "screen",
+                                }
+                            ],
+                        }
+                    ]
+                },
+            )
+        assert res.status_code == 200
+        data = res.json()
+        assert data["provider"] == "mock"
+        content = data["message"]["content"]
+        assert "Screen Snapshot (Observation Only)" in content
+
+
+@pytest.mark.asyncio
+async def test_chat_invalid_screen_image_rejected():
+    """Screen-derived images must still pass existing MIME and magic-byte security validation."""
+    import base64
+    fake_png = base64.b64encode(b"NOT_A_VALID_SCREEN_PNG").decode()
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+        res = await client.post(
+            "/api/chat",
+            json={
+                "messages": [
+                    {
+                        "role": "user",
+                        "content": "Look at my screen",
+                        "attachments": [
+                            {
+                                "mime_type": "image/png",
+                                "data": fake_png,
+                                "filename": "tampered_screen.png",
+                                "source": "screen",
+                            }
+                        ],
+                    }
+                ]
+            },
+        )
+    assert res.status_code == 400
+    assert "Image header does not match" in res.json()["detail"]
+
+
+@pytest.mark.asyncio
+async def test_chat_screen_with_voice_query():
+    """Chat endpoint supports screen snapshot combined with voice-originated spoken question."""
+    with patch("app.api.chat.get_llm_provider", return_value=MockProvider()):
+        async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+            res = await client.post(
+                "/api/chat",
+                json={
+                    "messages": [
+                        {
+                            "role": "user",
+                            "content": "VISTA, look at my screen and tell me what is wrong.",
+                            "input_mode": "voice",
+                            "attachments": [
+                                {
+                                    "mime_type": "image/png",
+                                    "data": VALID_PNG_B64,
+                                    "filename": "voice_screen_turn.png",
+                                    "source": "screen",
+                                }
+                            ],
+                        }
+                    ]
+                },
+            )
+        assert res.status_code == 200
+        data = res.json()
+        assert "Screen Snapshot (Observation Only)" in data["message"]["content"]
+
+
+@pytest.mark.asyncio
+async def test_chat_screen_multi_turn_followup():
+    """Screen context remains available in conversation history across follow-up questions."""
+    history = [
+        {
+            "role": "user",
+            "content": "What is wrong with this terminal output?",
+            "attachments": [
+                {
+                    "mime_type": "image/png",
+                    "data": VALID_PNG_B64,
+                    "filename": "terminal_screen.png",
+                    "source": "screen",
+                }
+            ],
+        },
+        {
+            "role": "assistant",
+            "content": "The terminal shows a ConnectionRefusedError on port 5432.",
+        },
+        {
+            "role": "user",
+            "content": "How do I check if the postgres service is running?",
+        },
+    ]
+    with patch("app.api.chat.get_llm_provider", return_value=MockProvider()):
+        async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+            res = await client.post("/api/chat", json={"messages": history})
+        assert res.status_code == 200
+        data = res.json()
+        assert len(data["message"]["content"]) > 0
+
+
+@pytest.mark.asyncio
+async def test_chat_invalid_attachment_source_rejected():
+    """Chat endpoint rejects unsupported attachment source values."""
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+        res = await client.post(
+            "/api/chat",
+            json={
+                "messages": [
+                    {
+                        "role": "user",
+                        "content": "Look at this",
+                        "attachments": [
+                            {
+                                "mime_type": "image/png",
+                                "data": VALID_PNG_B64,
+                                "filename": "alien_source.png",
+                                "source": "satellite",
+                            }
+                        ],
+                    }
+                ]
+            },
+        )
+    assert res.status_code == 422
+
+
+

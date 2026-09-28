@@ -9,6 +9,10 @@ class ImageAttachment(BaseModel):
     data: str = Field(..., description="Base64 encoded image data or data URI")
     filename: Optional[str] = Field(None, description="Original filename if available")
     size_bytes: Optional[int] = Field(None, description="Image payload size in bytes")
+    source: Optional[Literal["upload", "screen"]] = Field(
+        default="upload",
+        description="Source of visual context: 'upload' (attached file/clipboard) or 'screen' (screen capture snapshot)",
+    )
 
 class ChatMessage(BaseModel):
     role: Role

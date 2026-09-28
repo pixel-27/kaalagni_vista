@@ -5,12 +5,21 @@ export interface ImageAttachment {
   data: string // Base64 data or data URI
   filename?: string
   size_bytes?: number
+  source?: 'upload' | 'screen'
 }
 
 export type InputMode = 'text' | 'voice'
 
 export type VoiceRecognitionState = 'idle' | 'listening' | 'processing' | 'error' | 'unsupported'
 export type VoicePlaybackState = 'idle' | 'speaking' | 'paused' | 'unsupported'
+
+export type ScreenCaptureState =
+  | 'idle'
+  | 'requesting_permission'
+  | 'active'
+  | 'capturing'
+  | 'permission_denied'
+  | 'unsupported'
 
 export interface ChatMessage {
   role: Role

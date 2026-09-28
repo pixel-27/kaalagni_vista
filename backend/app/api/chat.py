@@ -52,6 +52,7 @@ async def send_chat_message(request: ChatRequest) -> ChatResponse:
                             data=clean_data,
                             filename=att.filename,
                             size_bytes=size_bytes,
+                            source=att.source,
                         )
                     )
                 except ImageValidationError as exc:

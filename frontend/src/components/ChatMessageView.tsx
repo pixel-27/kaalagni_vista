@@ -99,8 +99,10 @@ export function ChatMessageView({ message, modelName, onSpeak, isSpeaking }: Cha
                       }}
                     >
                       <span style={{ display: 'flex', alignItems: 'center', gap: '0.4rem' }}>
-                        <span>📷</span>
-                        <strong>{att.filename || 'Attached Screenshot'}</strong>
+                        <span>{att.source === 'screen' ? '🖥️' : '📷'}</span>
+                        <strong>
+                          {att.filename || (att.source === 'screen' ? 'Captured Screen Context' : 'Attached Screenshot')}
+                        </strong>
                       </span>
                       {sizeLabel && (
                         <span style={{ color: 'var(--text-muted)', fontFamily: 'var(--font-mono)' }}>

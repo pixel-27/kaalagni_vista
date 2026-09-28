@@ -31,12 +31,14 @@ class MockProvider(BaseLLMProvider):
         if last_user_msg_obj and last_user_msg_obj.attachments:
             num_att = len(last_user_msg_obj.attachments)
             att_types = ", ".join(a.mime_type for a in last_user_msg_obj.attachments)
+            is_screen = any(getattr(a, "source", None) == "screen" for a in last_user_msg_obj.attachments) or "screen" in full_conversation
+            source_label = "Screen Snapshot (Observation Only)" if is_screen else "Attached Image"
 
             if "keyerror" in full_conversation or "user_id" in full_conversation:
                 response = (
                     "### Visual Diagnostic Analysis (Mock)\n\n"
                     "Mock visual analysis received successfully.\n\n"
-                    f"**Visual Evidence Inspection ({num_att} image(s) [{att_types}]):**\n"
+                    f"**Visual Evidence Inspection ({num_att} image(s) [{att_types}] - {source_label}):**\n"
                     "- Visible traceback indicates an unhandled `KeyError: 'user_id'`.\n"
                     "- Failure occurred during request payload dictionary indexing.\n\n"
                     "**Root Cause:**\n"
@@ -49,7 +51,7 @@ class MockProvider(BaseLLMProvider):
                 response = (
                     "### Visual Diagnostic Analysis (Mock)\n\n"
                     "Mock visual analysis received successfully.\n\n"
-                    f"**Visual Evidence Inspection ({num_att} image(s) [{att_types}]):**\n"
+                    f"**Visual Evidence Inspection ({num_att} image(s) [{att_types}] - {source_label}):**\n"
                     "- Server console indicates HTTP 500 Internal Server Error.\n"
                     "- Unhandled exception detected in active router pipeline.\n\n"
                     "**Recommended Action:**\n"
@@ -57,14 +59,16 @@ class MockProvider(BaseLLMProvider):
                 )
                 return response, target_model, "stop"
             else:
+                source_note = "Visible screen context analyzed in observation-only mode." if is_screen else "Visual diagnostic context successfully processed alongside your prompt."
                 response = (
                     "### Visual Diagnostic Analysis (Mock)\n\n"
                     "Mock visual analysis received successfully.\n\n"
                     "**Visual Evidence Inspection:**\n"
                     f"- Received and verified {num_att} visual attachment(s) [{att_types}].\n"
-                    "- Visual diagnostic context successfully processed alongside your prompt.\n\n"
+                    f"- Visual Context Source: {source_label}.\n"
+                    f"- {source_note}\n\n"
                     "**Context Observation:**\n"
-                    f"Based on your query: `{last_user_msg_obj.content}` and the provided visual screenshot, "
+                    f"Based on your query: `{last_user_msg_obj.content}` and the visible screen context, "
                     "the system has established initial diagnostic telemetry."
                 )
                 return response, target_model, "stop"

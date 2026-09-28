@@ -1,14 +1,32 @@
 import { useState, useEffect, useRef } from 'react'
 import { ChatMessageView } from './components/ChatMessageView'
-import type { ChatMessage, ChatResponse, HealthData, ImageAttachment, VoiceRecognitionState, VoicePlaybackState, InputMode } from './types'
+import type {
+  ChatMessage,
+  ChatResponse,
+  HealthData,
+  ImageAttachment,
+  VoiceRecognitionState,
+  VoicePlaybackState,
+  InputMode,
+  ScreenCaptureState,
+} from './types'
 import {
   VoiceRecognitionController,
   VoiceSynthesisController,
   isSpeechRecognitionSupported,
   isSpeechSynthesisSupported,
 } from './services/voice'
+import {
+  ScreenCaptureController,
+  isScreenCaptureSupported,
+} from './services/screen'
 
 const QUICK_STARTERS = [
+  {
+    title: 'Screen Context Diagnosis',
+    subtitle: "VISTA, look at my screen and tell me what's wrong",
+    prompt: "VISTA, look at what's on my screen and tell me why this error is happening.",
+  },
   {
     title: 'Visual Screenshot Error',
     subtitle: "VISTA, look at this error and tell me what's wrong",
@@ -44,6 +62,12 @@ export default function App() {
   const [isDragging, setIsDragging] = useState(false)
   const [diagnosticState, setDiagnosticState] = useState<'idle' | 'uploading' | 'analyzing' | 'thinking' | 'responding'>('idle')
 
+  // Screen context state (Phase 5)
+  const [screenState, setScreenState] = useState<ScreenCaptureState>(
+    isScreenCaptureSupported() ? 'idle' : 'unsupported'
+  )
+  const [screenErrorMessage, setScreenErrorMessage] = useState<string | null>(null)
+
   // Voice interaction state (Phase 4)
   const [voiceRecState, setVoiceRecState] = useState<VoiceRecognitionState>(
     isSpeechRecognitionSupported() ? 'idle' : 'unsupported'
@@ -67,6 +91,7 @@ export default function App() {
   const fileInputRef = useRef<HTMLInputElement>(null)
   const recognitionRef = useRef<VoiceRecognitionController | null>(null)
   const synthesisRef = useRef<VoiceSynthesisController | null>(null)
+  const screenControllerRef = useRef<ScreenCaptureController | null>(null)
 
   useEffect(() => {
     const rec = new VoiceRecognitionController({
@@ -97,6 +122,31 @@ export default function App() {
       syn.stop()
     }
   }, [])
+
+  useEffect(() => {
+    const screenCtrl = new ScreenCaptureController({
+      onStateChange: (state) => setScreenState(state),
+      onError: (err) => setScreenErrorMessage(err),
+      onSnapshot: (attachment) => {
+        setPendingAttachment(attachment)
+        setScreenErrorMessage(null)
+      },
+    })
+    screenControllerRef.current = screenCtrl
+  }, [])
+
+  const handleTriggerScreenCapture = async () => {
+    setScreenErrorMessage(null)
+    setError(null)
+    if (screenControllerRef.current) {
+      await screenControllerRef.current.captureSnapshot()
+    }
+  }
+
+  const handleClearAttachment = () => {
+    setPendingAttachment(null)
+    screenControllerRef.current?.clear()
+  }
 
   const toggleVoiceRecognition = () => {
     setVoiceErrorMessage(null)
@@ -186,6 +236,7 @@ export default function App() {
         data: result,
         filename: fileName,
         size_bytes: file.size,
+        source: 'upload',
       })
     }
     reader.onerror = () => {
@@ -224,7 +275,12 @@ export default function App() {
     }
 
     setError(null)
-    const finalContent = content || "VISTA, look at this error and tell me what's wrong."
+    const finalContent =
+      content ||
+      (currentAttachment?.source === 'screen'
+        ? "VISTA, look at what's on my screen and tell me why this error is happening."
+        : "VISTA, look at this error and tell me what's wrong.")
+
     const userMessage: ChatMessage = {
       role: 'user',
       content: finalContent,
@@ -237,6 +293,7 @@ export default function App() {
     setMessages(updatedHistory)
     setInput('')
     setPendingAttachment(null)
+    screenControllerRef.current?.clear()
     setLastInputMode('text')
     setLoading(true)
 
@@ -314,7 +371,11 @@ export default function App() {
     if (window.confirm('Reset conversation history?')) {
       synthesisRef.current?.stop()
       recognitionRef.current?.stop()
+      screenControllerRef.current?.clear()
       setCurrentlySpeakingText(null)
+      setPendingAttachment(null)
+      setScreenErrorMessage(null)
+      setVoiceErrorMessage(null)
       setMessages([])
       setError(null)
     }
@@ -606,14 +667,16 @@ export default function App() {
           </span>
           <span
             style={{
-              padding: '0.15rem 0.45rem',
-              backgroundColor: '#151d2d',
+              padding: '0.15rem 0.5rem',
+              backgroundColor: pendingAttachment?.source === 'screen' ? 'rgba(6, 182, 212, 0.22)' : 'rgba(6, 182, 212, 0.1)',
+              color: 'var(--accent-cyan)',
               borderRadius: '4px',
-              border: '1px dashed #202b3f',
+              border: pendingAttachment?.source === 'screen' ? '1px solid var(--accent-cyan)' : '1px solid rgba(6, 182, 212, 0.3)',
               fontSize: '0.68rem',
+              fontWeight: 600,
             }}
           >
-            🖥 Screen Share (Phase 6)
+            {pendingAttachment?.source === 'screen' ? '🖥️ Screen Context Active' : '🖥️ Screen Context Ready'}
           </span>
         </div>
       </div>
@@ -838,7 +901,7 @@ export default function App() {
         }}
       >
         <div style={{ maxWidth: '900px', margin: '0 auto', display: 'flex', flexDirection: 'column', gap: '0.5rem' }}>
-          {/* Compact Image Preview before sending */}
+          {/* Compact Image/Screen Preview before sending */}
           {pendingAttachment && (
             <div
               style={{
@@ -846,15 +909,15 @@ export default function App() {
                 alignItems: 'center',
                 justifyContent: 'space-between',
                 padding: '0.45rem 0.75rem',
-                backgroundColor: '#111d2e',
-                border: '1px solid #1e3a5f',
+                backgroundColor: pendingAttachment.source === 'screen' ? '#0f2438' : '#111d2e',
+                border: pendingAttachment.source === 'screen' ? '1px solid #0284c7' : '1px solid #1e3a5f',
                 borderRadius: '8px',
               }}
             >
               <div style={{ display: 'flex', alignItems: 'center', gap: '0.65rem' }}>
                 <img
                   src={pendingAttachment.data}
-                  alt="Attachment thumbnail"
+                  alt="Context thumbnail"
                   style={{
                     width: '38px',
                     height: '38px',
@@ -865,30 +928,125 @@ export default function App() {
                 />
                 <div style={{ display: 'flex', flexDirection: 'column' }}>
                   <span style={{ fontSize: '0.78rem', color: '#f8fafc', fontWeight: 600 }}>
-                    📷 {pendingAttachment.filename || 'Attached Screenshot'}
+                    {pendingAttachment.source === 'screen' ? '🖥️ Captured Screen Context' : '📷 Attached Screenshot'}
                   </span>
                   <span style={{ fontSize: '0.68rem', color: 'var(--text-muted)', fontFamily: 'var(--font-mono)' }}>
-                    {pendingAttachment.size_bytes ? `${(pendingAttachment.size_bytes / 1024).toFixed(1)} KB` : ''} · {pendingAttachment.mime_type}
+                    {pendingAttachment.filename || (pendingAttachment.source === 'screen' ? 'screen-snapshot.png' : 'screenshot.png')} ·{' '}
+                    {pendingAttachment.size_bytes ? `${(pendingAttachment.size_bytes / 1024).toFixed(1)} KB` : ''} ·{' '}
+                    <span style={{ color: 'var(--accent-cyan)' }}>
+                      {pendingAttachment.source === 'screen' ? 'Observation Only' : 'User Upload'}
+                    </span>
                   </span>
                 </div>
               </div>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '0.4rem' }}>
+                {pendingAttachment.source === 'screen' && (
+                  <button
+                    type="button"
+                    onClick={handleTriggerScreenCapture}
+                    title="Retake screen snapshot"
+                    style={{
+                      backgroundColor: 'rgba(6, 182, 212, 0.15)',
+                      border: '1px solid rgba(6, 182, 212, 0.35)',
+                      color: 'var(--accent-cyan)',
+                      fontSize: '0.75rem',
+                      cursor: 'pointer',
+                      padding: '0.2rem 0.55rem',
+                      borderRadius: '4px',
+                      fontWeight: 600,
+                    }}
+                  >
+                    🔄 Retake
+                  </button>
+                )}
+                <button
+                  type="button"
+                  onClick={handleClearAttachment}
+                  title="Remove attachment or screen context"
+                  style={{
+                    backgroundColor: 'transparent',
+                    border: 'none',
+                    color: 'var(--text-muted)',
+                    fontSize: '0.85rem',
+                    cursor: 'pointer',
+                    padding: '0.2rem 0.5rem',
+                    borderRadius: '4px',
+                  }}
+                  onMouseOver={(e) => (e.currentTarget.style.color = 'var(--accent-rose)')}
+                  onMouseOut={(e) => (e.currentTarget.style.color = 'var(--text-muted)')}
+                >
+                  ✕ {pendingAttachment.source === 'screen' ? 'Stop' : 'Remove'}
+                </button>
+              </div>
+            </div>
+          )}
+
+          {/* Screen Requesting Permission / Capturing Banner */}
+          {(screenState === 'requesting_permission' || screenState === 'capturing') && (
+            <div
+              style={{
+                display: 'flex',
+                alignItems: 'center',
+                gap: '0.65rem',
+                padding: '0.5rem 0.85rem',
+                backgroundColor: 'rgba(6, 182, 212, 0.15)',
+                border: '1px solid rgba(6, 182, 212, 0.45)',
+                borderRadius: '8px',
+              }}
+            >
+              <span
+                style={{
+                  display: 'inline-block',
+                  width: '9px',
+                  height: '9px',
+                  borderRadius: '50%',
+                  backgroundColor: 'var(--accent-cyan)',
+                  animation: 'pulse 1.5s infinite',
+                }}
+              />
+              <span style={{ fontSize: '0.78rem', color: 'var(--accent-cyan)', fontWeight: 600 }}>
+                Screen Context:
+              </span>
+              <span style={{ fontSize: '0.8rem', color: '#ffffff' }}>
+                {screenState === 'requesting_permission'
+                  ? 'Awaiting display selection in browser dialog (Select a screen, window, or tab)...'
+                  : 'Capturing screen context frame...'}
+              </span>
+            </div>
+          )}
+
+          {/* Screen Error Banner */}
+          {screenErrorMessage && (
+            <div
+              style={{
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'space-between',
+                padding: '0.45rem 0.85rem',
+                backgroundColor: 'rgba(245, 158, 11, 0.12)',
+                border: '1px solid rgba(245, 158, 11, 0.35)',
+                borderRadius: '8px',
+                fontSize: '0.76rem',
+                color: '#fcd34d',
+              }}
+            >
+              <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+                <span>⚠️</span>
+                <span>{screenErrorMessage}</span>
+              </div>
               <button
                 type="button"
-                onClick={() => setPendingAttachment(null)}
-                title="Remove attachment"
+                onClick={() => setScreenErrorMessage(null)}
                 style={{
-                  backgroundColor: 'transparent',
+                  background: 'none',
                   border: 'none',
-                  color: 'var(--text-muted)',
-                  fontSize: '0.85rem',
+                  color: '#fcd34d',
                   cursor: 'pointer',
-                  padding: '0.2rem 0.5rem',
-                  borderRadius: '4px',
+                  fontSize: '0.85rem',
+                  padding: '0 0.3rem',
                 }}
-                onMouseOver={(e) => (e.currentTarget.style.color = 'var(--accent-rose)')}
-                onMouseOut={(e) => (e.currentTarget.style.color = 'var(--text-muted)')}
               >
-                ✕ Remove
+                ✕
               </button>
             </div>
           )}
@@ -1020,9 +1178,9 @@ export default function App() {
               disabled={loading}
               title="Attach screenshot (PNG, JPEG, WEBP - Max 10MB) or Ctrl+V"
               style={{
-                backgroundColor: pendingAttachment ? 'rgba(6, 182, 212, 0.15)' : 'transparent',
-                border: pendingAttachment ? '1px solid var(--accent-cyan)' : '1px solid transparent',
-                color: pendingAttachment ? 'var(--accent-cyan)' : 'var(--text-muted)',
+                backgroundColor: pendingAttachment && pendingAttachment.source !== 'screen' ? 'rgba(6, 182, 212, 0.15)' : 'transparent',
+                border: pendingAttachment && pendingAttachment.source !== 'screen' ? '1px solid var(--accent-cyan)' : '1px solid transparent',
+                color: pendingAttachment && pendingAttachment.source !== 'screen' ? 'var(--accent-cyan)' : 'var(--text-muted)',
                 padding: '0.5rem',
                 borderRadius: '6px',
                 cursor: 'pointer',
@@ -1034,13 +1192,75 @@ export default function App() {
                 transition: 'color 0.2s, border-color 0.2s',
               }}
               onMouseOver={(e) => {
-                if (!pendingAttachment) e.currentTarget.style.color = '#ffffff'
+                if (!pendingAttachment || pendingAttachment.source === 'screen') e.currentTarget.style.color = '#ffffff'
               }}
               onMouseOut={(e) => {
-                if (!pendingAttachment) e.currentTarget.style.color = 'var(--text-muted)'
+                if (!pendingAttachment || pendingAttachment.source === 'screen') e.currentTarget.style.color = 'var(--text-muted)'
               }}
             >
               📎
+            </button>
+
+            {/* Screen Context Button (Phase 5) */}
+            <button
+              type="button"
+              onClick={handleTriggerScreenCapture}
+              disabled={loading || screenState === 'unsupported' || screenState === 'requesting_permission' || screenState === 'capturing'}
+              title={
+                screenState === 'requesting_permission'
+                  ? 'Awaiting display selection...'
+                  : screenState === 'capturing'
+                  ? 'Capturing screen context frame...'
+                  : screenState === 'unsupported'
+                  ? 'Screen capture not supported in this browser'
+                  : pendingAttachment?.source === 'screen'
+                  ? 'Retake screen context snapshot'
+                  : 'Capture screen context (Click to share screen/window)'
+              }
+              style={{
+                backgroundColor:
+                  pendingAttachment?.source === 'screen'
+                    ? 'rgba(6, 182, 212, 0.22)'
+                    : screenState === 'requesting_permission' || screenState === 'capturing'
+                    ? 'rgba(245, 158, 11, 0.2)'
+                    : 'transparent',
+                border:
+                  pendingAttachment?.source === 'screen'
+                    ? '1px solid var(--accent-cyan)'
+                    : screenState === 'requesting_permission' || screenState === 'capturing'
+                    ? '1px solid #f59e0b'
+                    : '1px solid transparent',
+                color:
+                  pendingAttachment?.source === 'screen'
+                    ? 'var(--accent-cyan)'
+                    : screenState === 'requesting_permission' || screenState === 'capturing'
+                    ? '#f59e0b'
+                    : screenState === 'unsupported'
+                    ? '#475569'
+                    : 'var(--text-muted)',
+                padding: '0.5rem',
+                borderRadius: '6px',
+                cursor: loading || screenState === 'unsupported' ? 'not-allowed' : 'pointer',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                marginRight: '0.35rem',
+                marginBottom: '2px',
+                transition: 'all 0.2s',
+                boxShadow: pendingAttachment?.source === 'screen' ? '0 0 10px rgba(6, 182, 212, 0.4)' : 'none',
+              }}
+              onMouseOver={(e) => {
+                if (screenState !== 'unsupported' && pendingAttachment?.source !== 'screen') {
+                  e.currentTarget.style.color = '#ffffff'
+                }
+              }}
+              onMouseOut={(e) => {
+                if (screenState !== 'unsupported' && pendingAttachment?.source !== 'screen') {
+                  e.currentTarget.style.color = 'var(--text-muted)'
+                }
+              }}
+            >
+              🖥️
             </button>
 
             {/* Microphone Voice Input Button */}
@@ -1111,8 +1331,10 @@ export default function App() {
               disabled={loading}
               placeholder={
                 pendingAttachment
-                  ? "Ask a technical question about this screenshot (or press Enter)..."
-                  : "Describe the bug, paste an error traceback, speak via mic, or Ctrl+V a screenshot..."
+                  ? pendingAttachment.source === 'screen'
+                    ? "Ask a technical question about what's on your screen (or press Enter)..."
+                    : "Ask a technical question about this screenshot (or press Enter)..."
+                  : "Describe the bug, paste a traceback, click 🖥️ for screen context, 🎙️ for voice, or 📎 to attach..."
               }
               style={{
                 flex: 1,
@@ -1153,7 +1375,7 @@ export default function App() {
 
           {/* Input helper & Voice/Vision hints */}
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', fontSize: '0.7rem', color: 'var(--text-muted)' }}>
-            <span>Enter ↵ to send · Shift+Enter for new line · Click 🎙️ to speak · Ctrl+V to paste screenshot</span>
+            <span>Enter ↵ to send · Click 🖥️ for screen · Click 🎙️ for mic · Ctrl+V to paste screenshot</span>
             <div style={{ display: 'flex', gap: '0.75rem' }}>
               <span
                 style={{
@@ -1164,7 +1386,15 @@ export default function App() {
                 {voiceRecState === 'listening' ? '🔴 Mic Active' : '🎙 Voice Ready'}
               </span>
               <span style={{ color: 'var(--accent-cyan)', fontWeight: 600 }}>📎 Vision Ready</span>
-              <span>⚡ Controlled Tools (Phase 7)</span>
+              <span
+                style={{
+                  color: pendingAttachment?.source === 'screen' ? 'var(--accent-cyan)' : screenState === 'unsupported' ? 'var(--text-muted)' : 'var(--accent-cyan)',
+                  fontWeight: 600,
+                }}
+              >
+                {pendingAttachment?.source === 'screen' ? '🖥️ Screen Active' : '🖥️ Screen Ready'}
+              </span>
+              <span>⚡ Controlled Tools (Phase 6)</span>
             </div>
           </div>
         </div>
