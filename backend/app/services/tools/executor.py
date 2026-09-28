@@ -16,7 +16,8 @@ class ToolExecutor:
         call_id: str,
         tool_name: str,
         arguments: Dict[str, Any],
-        user_approved: bool = True,
+        user_approved: bool = False,
+        approval_token: Optional[str] = None,
     ) -> ToolResult:
         start_time = time.monotonic()
         tool = registry.get_tool(tool_name)
@@ -49,7 +50,12 @@ class ToolExecutor:
             )
 
         try:
-            output = await tool.execute(arguments=arguments, user_approved=user_approved)
+            output = await tool.execute(
+                arguments=arguments,
+                user_approved=user_approved,
+                call_id=call_id,
+                approval_token=approval_token,
+            )
             duration = round(time.monotonic() - start_time, 3)
             logger.info("Tool '%s' executed successfully in %.2fs (call_id: %s)", tool_name, duration, call_id)
             return ToolResult(

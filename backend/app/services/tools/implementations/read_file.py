@@ -40,7 +40,14 @@ class ReadFileTool(BaseTool):
             },
         )
 
-    async def execute(self, arguments: Dict[str, Any], user_approved: bool = True) -> Dict[str, Any]:
+    async def execute(
+        self,
+        arguments: Dict[str, Any],
+        user_approved: bool = False,
+        call_id: Optional[str] = None,
+        approval_token: Optional[str] = None,
+        **kwargs,
+    ) -> Dict[str, Any]:
         path_str = arguments.get("path")
         if not path_str:
             raise ToolPolicyError("Missing required argument: 'path'.")

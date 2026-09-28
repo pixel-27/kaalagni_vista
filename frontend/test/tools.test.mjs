@@ -124,11 +124,12 @@ test('Controlled Tools: Confirmation flow logic separates read_only vs execution
   assert.equal(requiresConfirmation('run_test'), true)
 })
 
-test('Controlled Tools: User Allow action formats approved execution request', () => {
+test('Controlled Tools: User Allow action formats approved execution request with approval token', () => {
   const pendingCall = {
     id: 'call_rt_777',
     tool: 'run_test',
     arguments: { test_target: 'backend_tests' },
+    approval_token: '1727500000.abc123sig',
   }
 
   const formatExecuteRequest = (call, userApproved) => ({
@@ -136,12 +137,14 @@ test('Controlled Tools: User Allow action formats approved execution request', (
     tool: call.tool,
     arguments: call.arguments,
     user_approved: userApproved,
+    approval_token: call.approval_token,
   })
 
   const reqAllowed = formatExecuteRequest(pendingCall, true)
   assert.equal(reqAllowed.user_approved, true)
   assert.equal(reqAllowed.tool, 'run_test')
   assert.equal(reqAllowed.arguments.test_target, 'backend_tests')
+  assert.equal(reqAllowed.approval_token, '1727500000.abc123sig')
 
   const reqDenied = formatExecuteRequest(pendingCall, false)
   assert.equal(reqDenied.user_approved, false)

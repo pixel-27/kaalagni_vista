@@ -1,8 +1,17 @@
+import hashlib
+import hmac
+import json
 import re
+import secrets
+import time
 from pathlib import Path
-from typing import Union
+from typing import Union, Dict, Any, Optional, Set
 from app.core.config import ROOT_DIR
 from .base import ToolPolicyError
+
+# Backend-generated cryptographic secret for approval tokens (in-memory, rotated per process)
+_APPROVAL_SECRET: bytes = secrets.token_bytes(32)
+_CONSUMED_TOKENS: Set[str] = set()
 
 # Denied filename patterns
 DENIED_FILE_PATTERNS = [
@@ -118,19 +127,91 @@ class ToolPolicy:
         return redacted
 
     @classmethod
+    def generate_approval_token(cls, call_id: str, tool_name: str, arguments: Dict[str, Any]) -> str:
+        """
+        Generates a cryptographically signed, timestamped approval token for an execution tool call.
+        """
+        timestamp = int(time.time())
+        canonical_args = json.dumps(arguments, sort_keys=True, separators=(",", ":"))
+        payload = f"{call_id}:{tool_name}:{canonical_args}:{timestamp}"
+        signature = hmac.new(_APPROVAL_SECRET, payload.encode("utf-8"), hashlib.sha256).hexdigest()
+        return f"{timestamp}.{signature}"
+
+    @classmethod
+    def verify_approval_token(
+        cls,
+        call_id: str,
+        tool_name: str,
+        arguments: Dict[str, Any],
+        token: Optional[str],
+        max_age_seconds: int = 900,
+    ) -> bool:
+        """
+        Validates an approval token:
+        1. Must be non-empty string in format: timestamp.signature
+        2. Must not be expired (within max_age_seconds, default 15 min)
+        3. Must not be replayed (single-use)
+        4. Cryptographic HMAC must match call_id, tool_name, arguments, and timestamp.
+        """
+        if not token or not isinstance(token, str) or "." not in token:
+            return False
+
+        parts = token.split(".", 1)
+        if len(parts) != 2:
+            return False
+
+        try:
+            timestamp = int(parts[0])
+            signature = parts[1]
+        except ValueError:
+            return False
+
+        now = int(time.time())
+        # Check expiration and future clock skew
+        if (now - timestamp) > max_age_seconds or timestamp > (now + 60):
+            return False
+
+        token_key = f"{call_id}:{token}"
+        if token_key in _CONSUMED_TOKENS:
+            return False
+
+        canonical_args = json.dumps(arguments, sort_keys=True, separators=(",", ":"))
+        payload = f"{call_id}:{tool_name}:{canonical_args}:{timestamp}"
+        expected_sig = hmac.new(_APPROVAL_SECRET, payload.encode("utf-8"), hashlib.sha256).hexdigest()
+
+        if not hmac.compare_digest(signature, expected_sig):
+            return False
+
+        # Mark single-use token consumed
+        _CONSUMED_TOKENS.add(token_key)
+        return True
+
+    @classmethod
     def check_execution_permission(
         cls,
+        call_id: str,
         tool_name: str,
+        arguments: Dict[str, Any],
         permission_level: str,
         user_approved: bool,
+        approval_token: Optional[str] = None,
     ) -> None:
         """
         Validates user permission level for tool execution.
 
         Raises:
-            ToolPolicyError: If execution permission is required but not granted.
+            ToolPolicyError: If execution permission is required but not granted or token is missing/invalid.
         """
-        if permission_level == "execution" and not user_approved:
-            raise ToolPolicyError(
-                f"Execution permission denied: Tool '{tool_name}' requires explicit user confirmation before running."
-            )
+        if permission_level == "execution":
+            if not user_approved:
+                raise ToolPolicyError(
+                    f"Execution permission denied: Tool '{tool_name}' requires explicit user confirmation before running."
+                )
+            if not approval_token:
+                raise ToolPolicyError(
+                    f"Execution permission denied: Missing backend approval token for '{tool_name}'."
+                )
+            if not cls.verify_approval_token(call_id, tool_name, arguments, approval_token):
+                raise ToolPolicyError(
+                    f"Execution permission denied: Invalid, expired, or fabricated approval token for '{tool_name}'."
+                )

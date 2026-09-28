@@ -10,6 +10,15 @@ TOOL_REQUEST_REGEX = re.compile(
     re.DOTALL
 )
 
+def _create_tool_call(tool_name: str, args: dict) -> ToolCall:
+    call_id = f"call_{uuid.uuid4().hex[:8]}"
+    approval_token = None
+    tool_obj = registry.get_tool(tool_name)
+    if tool_obj and tool_obj.definition.permission_level == "execution":
+        from app.services.tools.policy import ToolPolicy
+        approval_token = ToolPolicy.generate_approval_token(call_id, tool_name, args)
+    return ToolCall(id=call_id, tool=tool_name, arguments=args, approval_token=approval_token)
+
 def extract_tool_calls(text: str) -> Tuple[str, Optional[List[ToolCall]], Optional[str]]:
     """
     Inspects LLM text output for structured tool request JSON blocks.
@@ -35,8 +44,7 @@ def extract_tool_calls(text: str) -> Tuple[str, Optional[List[ToolCall]], Option
                     tool_name = data["tool"]
                     args = data.get("arguments", {})
                     if registry.is_registered(tool_name):
-                        call_id = f"call_{uuid.uuid4().hex[:8]}"
-                        tool_calls.append(ToolCall(id=call_id, tool=tool_name, arguments=args))
+                        tool_calls.append(_create_tool_call(tool_name, args))
                         return "", tool_calls, "tool_calls"
             except Exception:
                 pass
@@ -51,8 +59,7 @@ def extract_tool_calls(text: str) -> Tuple[str, Optional[List[ToolCall]], Option
             args = {}
 
         if registry.is_registered(tool_name):
-            call_id = f"call_{uuid.uuid4().hex[:8]}"
-            tool_calls.append(ToolCall(id=call_id, tool=tool_name, arguments=args))
+            tool_calls.append(_create_tool_call(tool_name, args))
             # Remove the tool JSON from clean text
             clean_text = clean_text.replace(match.group(0), "").strip()
 

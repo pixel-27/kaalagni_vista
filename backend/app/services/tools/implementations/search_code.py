@@ -1,6 +1,6 @@
 import os
 from pathlib import Path
-from typing import Dict, Any, List
+from typing import Dict, Any, List, Optional
 from app.models.tools import ToolDefinition
 from app.services.tools.base import BaseTool, ToolPolicyError
 from app.services.tools.policy import ToolPolicy, DENIED_DIRECTORIES, DENIED_FILE_PATTERNS
@@ -57,7 +57,14 @@ class SearchCodeTool(BaseTool):
             },
         )
 
-    async def execute(self, arguments: Dict[str, Any], user_approved: bool = True) -> Dict[str, Any]:
+    async def execute(
+        self,
+        arguments: Dict[str, Any],
+        user_approved: bool = False,
+        call_id: Optional[str] = None,
+        approval_token: Optional[str] = None,
+        **kwargs,
+    ) -> Dict[str, Any]:
         raw_query = arguments.get("query", "")
         if not raw_query or len(raw_query.strip()) < 2:
             raise ToolPolicyError("Search query must be at least 2 characters long.")

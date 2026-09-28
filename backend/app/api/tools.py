@@ -30,5 +30,6 @@ async def execute_tool(request: ToolExecuteRequest) -> ToolExecuteResponse:
         tool_name=request.tool,
         arguments=request.arguments,
         user_approved=request.user_approved,
+        approval_token=request.approval_token,
     )
     return ToolExecuteResponse(result=result)

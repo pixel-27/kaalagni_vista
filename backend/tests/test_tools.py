@@ -211,10 +211,26 @@ async def test_analyze_error_empty_input():
     assert data["output"]["error_type"] == "Unknown"
 
 @pytest.mark.asyncio
-async def test_run_test_requires_user_approval():
-    """run_test requires user_approved=True and denies execution when user_approved=False."""
+async def test_run_test_without_approval_rejected():
+    """run_test strictly rejects direct calls when user_approved is omitted or False, with zero execution."""
     async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
-        # User denied
+        # Case A: user_approved omitted
+        res_omitted = await client.post(
+            "/api/tools/execute",
+            json={
+                "call_id": "call_rt_no_approval",
+                "tool": "run_test",
+                "arguments": {
+                    "test_target": "backend_tests",
+                },
+            },
+        )
+        assert res_omitted.status_code == 200
+        data_omitted = res_omitted.json()["result"]
+        assert data_omitted["status"] == "denied"
+        assert "denied by user" in data_omitted["error"]
+
+        # Case B: user_approved=False
         res_denied = await client.post(
             "/api/tools/execute",
             json={
@@ -226,10 +242,114 @@ async def test_run_test_requires_user_approval():
                 "user_approved": False,
             },
         )
-    assert res_denied.status_code == 200
-    data_denied = res_denied.json()["result"]
-    assert data_denied["status"] == "denied"
-    assert "denied by user" in data_denied["error"]
+        assert res_denied.status_code == 200
+        data_denied = res_denied.json()["result"]
+        assert data_denied["status"] == "denied"
+        assert "denied by user" in data_denied["error"]
+
+@pytest.mark.asyncio
+async def test_run_test_missing_or_fabricated_approval_token_rejected():
+    """run_test strictly rejects requests with missing or fabricated approval tokens even if user_approved=True."""
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+        # Case A: user_approved=True but missing approval_token
+        res_no_tok = await client.post(
+            "/api/tools/execute",
+            json={
+                "call_id": "call_rt_no_tok",
+                "tool": "run_test",
+                "arguments": {
+                    "test_target": "backend_tests",
+                },
+                "user_approved": True,
+            },
+        )
+        assert res_no_tok.status_code == 200
+        data_no_tok = res_no_tok.json()["result"]
+        assert data_no_tok["status"] == "error"
+        assert "Missing backend approval token" in data_no_tok["error"]
+
+        # Case B: user_approved=True with fabricated approval token
+        for bad_token in ["fabricated_token", "1727500000.badhash", "random_string_xyz"]:
+            res_bad_tok = await client.post(
+                "/api/tools/execute",
+                json={
+                    "call_id": "call_rt_bad_tok",
+                    "tool": "run_test",
+                    "arguments": {
+                        "test_target": "backend_tests",
+                    },
+                    "user_approved": True,
+                    "approval_token": bad_token,
+                },
+            )
+            assert res_bad_tok.status_code == 200
+            data_bad_tok = res_bad_tok.json()["result"]
+            assert data_bad_tok["status"] == "error"
+            assert "Invalid, expired, or fabricated approval token" in data_bad_tok["error"]
+
+@pytest.mark.asyncio
+async def test_run_test_tampered_arguments_rejected():
+    """run_test rejects tokens if arguments were tampered with after issuance."""
+    call_id = "call_rt_tamper"
+    valid_args = {"test_target": "backend_tests"}
+    token = ToolPolicy.generate_approval_token(call_id, "run_test", valid_args)
+
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+        # Client tries to use token for frontend_tests instead
+        res = await client.post(
+            "/api/tools/execute",
+            json={
+                "call_id": call_id,
+                "tool": "run_test",
+                "arguments": {
+                    "test_target": "frontend_tests",
+                },
+                "user_approved": True,
+                "approval_token": token,
+            },
+        )
+    assert res.status_code == 200
+    data = res.json()["result"]
+    assert data["status"] == "error"
+    assert "Invalid, expired, or fabricated approval token" in data["error"]
+
+@pytest.mark.asyncio
+async def test_run_test_token_replay_rejected():
+    """run_test enforces single-use tokens; replaying the same token is blocked."""
+    call_id = "call_rt_replay"
+    args = {"test_target": "backend_tests"}
+    token = ToolPolicy.generate_approval_token(call_id, "run_test", args)
+
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+        # First execution succeeds
+        res1 = await client.post(
+            "/api/tools/execute",
+            json={
+                "call_id": call_id,
+                "tool": "run_test",
+                "arguments": args,
+                "user_approved": True,
+                "approval_token": token,
+            },
+        )
+        assert res1.status_code == 200
+        assert res1.json()["result"]["status"] == "success"
+
+        # Replay attempt fails
+        res2 = await client.post(
+            "/api/tools/execute",
+            json={
+                "call_id": call_id,
+                "tool": "run_test",
+                "arguments": args,
+                "user_approved": True,
+                "approval_token": token,
+            },
+        )
+        assert res2.status_code == 200
+        data2 = res2.json()["result"]
+        assert data2["status"] == "error"
+        assert "Invalid, expired, or fabricated approval token" in data2["error"]
 
 @pytest.mark.asyncio
 async def test_run_test_unapproved_target_rejected():
@@ -241,6 +361,7 @@ async def test_run_test_unapproved_target_rejected():
             "python arbitrary.py",
             "malicious_suite",
         ]:
+            bad_token = ToolPolicy.generate_approval_token("call_rt_bad", "run_test", {"test_target": bad_target})
             res = await client.post(
                 "/api/tools/execute",
                 json={
@@ -250,6 +371,7 @@ async def test_run_test_unapproved_target_rejected():
                         "test_target": bad_target,
                     },
                     "user_approved": True,
+                    "approval_token": bad_token,
                 },
             )
             assert res.status_code == 200
@@ -258,18 +380,21 @@ async def test_run_test_unapproved_target_rejected():
             assert "Unknown or unapproved test target" in data["error"]
 
 @pytest.mark.asyncio
-async def test_run_test_allowed_target_executes():
-    """run_test executes approved backend_tests target when user_approved=True."""
+async def test_run_test_allowed_target_executes_with_valid_token():
+    """run_test executes approved backend_tests target when user_approved=True and valid approval_token is supplied."""
+    call_id = "call_rt_valid_exec"
+    args = {"test_target": "backend_tests"}
+    token = ToolPolicy.generate_approval_token(call_id, "run_test", args)
+
     async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
         res = await client.post(
             "/api/tools/execute",
             json={
-                "call_id": "call_rt_ok",
+                "call_id": call_id,
                 "tool": "run_test",
-                "arguments": {
-                    "test_target": "backend_tests",
-                },
+                "arguments": args,
                 "user_approved": True,
+                "approval_token": token,
             },
         )
     assert res.status_code == 200
@@ -280,6 +405,34 @@ async def test_run_test_allowed_target_executes():
     assert out["exit_code"] == 0
     assert "passed" in out["stdout"].lower()
     assert out["timed_out"] is False
+
+@pytest.mark.asyncio
+async def test_chat_turn_generates_approval_token_for_execution_tool():
+    """Chat endpoint generates a valid approval_token when an execution tool is requested."""
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+        res = await client.post(
+            "/api/chat",
+            json={
+                "messages": [
+                    {"role": "user", "content": "Please verify by running tests"}
+                ]
+            },
+        )
+    assert res.status_code == 200
+    data = res.json()
+    tool_calls = data["message"]["tool_calls"]
+    assert len(tool_calls) == 1
+    tc = tool_calls[0]
+    assert tc["tool"] == "run_test"
+    assert tc["approval_token"] is not None
+    assert "." in tc["approval_token"]
+    # Token must verify against ToolPolicy
+    assert ToolPolicy.verify_approval_token(
+        tc["id"],
+        tc["tool"],
+        tc["arguments"],
+        tc["approval_token"],
+    ) is True
 
 @pytest.mark.asyncio
 async def test_chat_turn_triggers_read_file_tool_call():

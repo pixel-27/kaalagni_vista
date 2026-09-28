@@ -21,6 +21,7 @@ class ToolCall(BaseModel):
     id: str = Field(..., description="Unique identifier for this tool call turn")
     tool: str = Field(..., description="Name of the requested tool")
     arguments: Dict[str, Any] = Field(default_factory=dict, description="Key-value arguments for tool execution")
+    approval_token: Optional[str] = Field(default=None, description="Backend approval token for execution tools")
 
 class ToolResult(BaseModel):
     call_id: str = Field(..., description="ID matching the originating ToolCall")
@@ -35,7 +36,8 @@ class ToolExecuteRequest(BaseModel):
     call_id: str = Field(..., description="Unique tool call ID")
     tool: str = Field(..., description="Tool name to execute")
     arguments: Dict[str, Any] = Field(default_factory=dict, description="Tool arguments")
-    user_approved: bool = Field(default=True, description="Whether the user explicitly approved execution (for execution tools)")
+    user_approved: bool = Field(default=False, description="Whether the user explicitly approved execution (for execution tools)")
+    approval_token: Optional[str] = Field(default=None, description="Cryptographic backend approval token required for execution tools")
 
 class ToolExecuteResponse(BaseModel):
     result: ToolResult

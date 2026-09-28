@@ -27,7 +27,7 @@ kaalagni/
 │   ├── .venv/                # Isolated Python 3.12 virtual environment
 │   ├── pytest.ini            # Pytest configuration
 │   ├── requirements.txt      # Backend Python dependencies
-│   ├── tests/                # Automated test suite (46 tests)
+│   ├── tests/                # Automated test suite (50 tests)
 │   │   ├── test_health.py    # Health & root endpoint tests
 │   │   ├── test_chat.py      # Chat validation, provider, context, & error tests
 │   │   └── test_tools.py     # Diagnostic tool registry, policy, sandbox, & execution tests
@@ -123,6 +123,8 @@ VISTA operates as a **limited, controlled diagnostic agent**. VISTA can request 
   - Tool: `run_test`.
   - Invokes an external diagnostic process.
   - **Mandatory User Confirmation:** Execution is blocked until the user explicitly reviews the pending action and clicks **`[Allow & Run Test]`** or **`[Deny]`**.
+  - **Backend-Enforced Cryptographic Approval Tokens:** Frontend UI is NOT the sole security boundary. When an execution tool is requested, the backend signs a single-use, timestamped HMAC approval token bound to the specific `call_id`, `tool`, and arguments.
+  - Direct API calls without valid approval (`user_approved=False`), without tokens, with fabricated tokens, with tampered arguments, or with replayed tokens are strictly rejected by the backend policy layer before execution.
   - If denied by the user, a structured rejection (`status: "denied"`) is returned to the agent, allowing VISTA to continue conversationally without taking action.
 
 ### 3. Security Boundaries & Sandboxing
@@ -228,7 +230,7 @@ Open `http://127.0.0.1:5173/` in your browser.
 ## Running Automated Tests
 
 ### Backend Test Suite (Pytest)
-Run all 46 backend tests:
+Run all 50 backend tests:
 ```bash
 cd backend
 .\.venv\Scripts\python.exe -m pytest -v -p no:cacheprovider

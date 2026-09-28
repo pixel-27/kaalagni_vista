@@ -461,6 +461,7 @@ export default function App() {
         tool: call.tool,
         arguments: call.arguments,
         user_approved: approved,
+        approval_token: call.approval_token,
       })
 
       const toolMsg: ChatMessage = {

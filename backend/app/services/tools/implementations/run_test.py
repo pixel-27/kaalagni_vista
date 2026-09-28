@@ -2,7 +2,7 @@ import asyncio
 import os
 import sys
 import time
-from typing import Dict, Any, List
+from typing import Dict, Any, List, Optional
 from app.models.tools import ToolDefinition
 from app.services.tools.base import BaseTool, ToolPolicyError, ToolExecutionError
 from app.services.tools.policy import ToolPolicy
@@ -62,8 +62,21 @@ class RunTestTool(BaseTool):
             },
         )
 
-    async def execute(self, arguments: Dict[str, Any], user_approved: bool = True) -> Dict[str, Any]:
-        ToolPolicy.check_execution_permission("run_test", "execution", user_approved)
+    async def execute(
+        self,
+        arguments: Dict[str, Any],
+        user_approved: bool = False,
+        call_id: Optional[str] = None,
+        approval_token: Optional[str] = None,
+    ) -> Dict[str, Any]:
+        ToolPolicy.check_execution_permission(
+            call_id=call_id or "",
+            tool_name="run_test",
+            arguments=arguments,
+            permission_level="execution",
+            user_approved=user_approved,
+            approval_token=approval_token,
+        )
 
         test_target = arguments.get("test_target")
         if not test_target:

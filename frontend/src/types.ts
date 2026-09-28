@@ -14,6 +14,7 @@ export interface ToolCall {
   id: string
   tool: string
   arguments: Record<string, unknown>
+  approval_token?: string
 }
 
 export interface ToolResult {
@@ -71,6 +72,7 @@ export interface ToolExecuteRequest {
   tool: string
   arguments: Record<string, unknown>
   user_approved: boolean
+  approval_token?: string
 }
 
 export interface ToolExecuteResponse {
