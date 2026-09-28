@@ -18,18 +18,36 @@ class GeminiProvider(BaseLLMProvider):
         self.api_key = api_key if api_key is not None else settings.GEMINI_API_KEY
 
     def _convert_messages(self, messages: List[ChatMessage]) -> List[Dict[str, Any]]:
-        """Converts ChatMessages into Gemini contents array."""
+        """Converts ChatMessages into Gemini contents array with multimodal support."""
         contents: List[Dict[str, Any]] = []
         for msg in messages:
             if msg.role == "system":
                 # System prompt is passed separately in generationConfig/system_instruction
                 continue
             role = "user" if msg.role == "user" else "model"
-            contents.append({
-                "role": role,
-                "parts": [{"text": msg.content}],
-            })
+            parts: List[Dict[str, Any]] = []
+
+            # Append visual attachments as inlineData parts
+            if msg.attachments:
+                for att in msg.attachments:
+                    parts.append({
+                        "inlineData": {
+                            "mimeType": att.mime_type,
+                            "data": att.data,
+                        }
+                    })
+
+            # Append message text
+            if msg.content:
+                parts.append({"text": msg.content})
+
+            if parts:
+                contents.append({
+                    "role": role,
+                    "parts": parts,
+                })
         return contents
+
 
     async def generate_response(
         self,

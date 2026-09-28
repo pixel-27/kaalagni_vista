@@ -1,10 +1,19 @@
 export type Role = 'user' | 'assistant' | 'system'
 
+export interface ImageAttachment {
+  mime_type: string
+  data: string // Base64 data or data URI
+  filename?: string
+  size_bytes?: number
+}
+
 export interface ChatMessage {
   role: Role
   content: string
+  attachments?: ImageAttachment[]
   timestamp?: string
 }
+
 
 export interface ChatResponse {
   message: ChatMessage

@@ -1,8 +1,13 @@
 import { useState, useEffect, useRef } from 'react'
 import { ChatMessageView } from './components/ChatMessageView'
-import type { ChatMessage, ChatResponse, HealthData } from './types'
+import type { ChatMessage, ChatResponse, HealthData, ImageAttachment } from './types'
 
 const QUICK_STARTERS = [
+  {
+    title: 'Visual Screenshot Error',
+    subtitle: "VISTA, look at this error and tell me what's wrong",
+    prompt: "VISTA, look at this error and tell me what's wrong.",
+  },
   {
     title: 'FastAPI 500 Error',
     subtitle: 'Unhandled exception & traceback diagnosis',
@@ -18,11 +23,6 @@ const QUICK_STARTERS = [
     subtitle: 'Connection exhaustion under async load',
     prompt: 'My async database connection pool is timing out with "OperationalError: connection pool exhausted". How should I tune pool size and timeout parameters?',
   },
-  {
-    title: 'React State Desync',
-    subtitle: 'Infinite re-render in useEffect',
-    prompt: 'My React component is stuck in an infinite re-render loop inside a useEffect hook. How do I properly structure the dependency array?',
-  },
 ]
 
 export default function App() {
@@ -33,6 +33,11 @@ export default function App() {
   const [lastModelUsed, setLastModelUsed] = useState<string>('')
   const [showHealthModal, setShowHealthModal] = useState(false)
 
+  // Multimodal visual attachment state (Phase 3)
+  const [pendingAttachment, setPendingAttachment] = useState<ImageAttachment | null>(null)
+  const [isDragging, setIsDragging] = useState(false)
+  const [diagnosticState, setDiagnosticState] = useState<'idle' | 'uploading' | 'analyzing' | 'thinking' | 'responding'>('idle')
+
   // Health telemetry state (preserved from Phase 1)
   const [health, setHealth] = useState<HealthData | null>(null)
   const [healthStatus, setHealthStatus] = useState<'checking' | 'connected' | 'error'>('checking')
@@ -40,6 +45,8 @@ export default function App() {
 
   const messagesEndRef = useRef<HTMLDivElement>(null)
   const textareaRef = useRef<HTMLTextAreaElement>(null)
+  const fileInputRef = useRef<HTMLInputElement>(null)
+
 
   const scrollToBottom = () => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' })
@@ -80,26 +87,93 @@ export default function App() {
     return () => clearInterval(interval)
   }, [])
 
+  const processImageFile = (file: File, fallbackName?: string) => {
+    setError(null)
+    const validMimes = ['image/png', 'image/jpeg', 'image/jpg', 'image/webp']
+    const fileType = file.type.toLowerCase()
+    const fileName = file.name || fallbackName || 'screenshot.png'
+
+    if (!validMimes.includes(fileType) && !fileName.match(/\.(png|jpe?g|webp)$/i)) {
+      setError('Unsupported image format. Please attach a PNG, JPEG, or WEBP image.')
+      return
+    }
+    const MAX_SIZE = 10 * 1024 * 1024 // 10MB
+    if (file.size > MAX_SIZE) {
+      setError(`Image file size (${(file.size / (1024 * 1024)).toFixed(1)}MB) exceeds the 10MB limit.`)
+      return
+    }
+
+    const reader = new FileReader()
+    reader.onload = () => {
+      const result = reader.result as string
+      let mime = file.type || 'image/png'
+      if (mime === 'image/jpg') mime = 'image/jpeg'
+      setPendingAttachment({
+        mime_type: mime,
+        data: result,
+        filename: fileName,
+        size_bytes: file.size,
+      })
+    }
+    reader.onerror = () => {
+      setError('Failed to read image attachment from disk or clipboard.')
+    }
+    reader.readAsDataURL(file)
+  }
+
+  const handlePaste = (e: React.ClipboardEvent<HTMLTextAreaElement>) => {
+    const items = e.clipboardData?.items
+    if (!items) return
+    for (let i = 0; i < items.length; i++) {
+      const item = items[i]
+      if (item.type.startsWith('image/')) {
+        const file = item.getAsFile()
+        if (file) {
+          e.preventDefault()
+          const ext = item.type.split('/')[1] === 'jpeg' ? 'jpg' : item.type.split('/')[1] || 'png'
+          processImageFile(file, `pasted-screenshot-${new Date().toLocaleTimeString().replace(/:/g, '-')}.${ext}`)
+          return
+        }
+      }
+    }
+  }
+
   const sendMessage = async (textToSend?: string) => {
     const content = (textToSend || input).trim()
-    if (!content || loading) return
+    const currentAttachment = pendingAttachment
+
+    if ((!content && !currentAttachment) || loading) return
 
     setError(null)
+    const finalContent = content || "VISTA, look at this error and tell me what's wrong."
     const userMessage: ChatMessage = {
       role: 'user',
-      content,
+      content: finalContent,
+      attachments: currentAttachment ? [currentAttachment] : undefined,
       timestamp: new Date().toISOString(),
     }
 
     const updatedHistory = [...messages, userMessage]
     setMessages(updatedHistory)
     setInput('')
+    setPendingAttachment(null)
     setLoading(true)
+
+    if (currentAttachment) {
+      setDiagnosticState('uploading')
+      setTimeout(() => setDiagnosticState('analyzing'), 350)
+    } else {
+      setDiagnosticState('thinking')
+    }
 
     try {
       let res: Response
       const payload = {
-        messages: updatedHistory.map((m) => ({ role: m.role, content: m.content })),
+        messages: updatedHistory.map((m) => ({
+          role: m.role,
+          content: m.content,
+          attachments: m.attachments,
+        })),
       }
 
       try {
@@ -127,6 +201,7 @@ export default function App() {
         throw new Error(errDetail)
       }
 
+      setDiagnosticState('responding')
       const data: ChatResponse = await res.json()
       setMessages([...updatedHistory, data.message])
       setLastModelUsed(`${data.provider} · ${data.model}`)
@@ -135,6 +210,7 @@ export default function App() {
       setError(msg)
     } finally {
       setLoading(false)
+      setDiagnosticState('idle')
       setTimeout(() => textareaRef.current?.focus(), 50)
     }
   }
@@ -145,6 +221,7 @@ export default function App() {
       sendMessage()
     }
   }
+
 
   const clearChat = () => {
     if (window.confirm('Reset conversation history?')) {
@@ -350,7 +427,7 @@ export default function App() {
         </div>
       )}
 
-      {/* Multimodal Context Bar (Phase 3 & 6 Preview) */}
+      {/* Multimodal Context Bar (Phase 3 Active) */}
       <div
         style={{
           backgroundColor: '#0c101a',
@@ -366,19 +443,33 @@ export default function App() {
       >
         <div style={{ display: 'flex', alignItems: 'center', gap: '0.6rem' }}>
           <span>👁 Visual Context:</span>
-          <span style={{ color: 'var(--text-secondary)' }}>None attached (Text troubleshooting active)</span>
+          {pendingAttachment ? (
+            <span style={{ color: 'var(--accent-cyan)', fontWeight: 600 }}>
+              Attachment staged ({pendingAttachment.filename}) · Ready to send
+            </span>
+          ) : messages.some((m) => m.attachments && m.attachments.length > 0) ? (
+            <span style={{ color: 'var(--accent-emerald)', fontWeight: 600 }}>
+              Active (Multi-turn visual context engaged)
+            </span>
+          ) : (
+            <span style={{ color: 'var(--text-secondary)' }}>
+              Ready (Click 📎 or paste Ctrl+V to attach technical screenshot)
+            </span>
+          )}
         </div>
         <div style={{ display: 'flex', gap: '0.5rem' }}>
           <span
             style={{
-              padding: '0.15rem 0.45rem',
-              backgroundColor: '#151d2d',
+              padding: '0.15rem 0.5rem',
+              backgroundColor: 'rgba(6, 182, 212, 0.12)',
+              color: 'var(--accent-cyan)',
               borderRadius: '4px',
-              border: '1px dashed #202b3f',
+              border: '1px solid rgba(6, 182, 212, 0.3)',
               fontSize: '0.68rem',
+              fontWeight: 600,
             }}
           >
-            📷 Screenshot Upload (Phase 3)
+            📷 Multimodal Vision Active
           </span>
           <span
             style={{
@@ -393,6 +484,7 @@ export default function App() {
           </span>
         </div>
       </div>
+
 
       {/* Main Conversation Viewport */}
       <main
@@ -529,7 +621,15 @@ export default function App() {
                         animation: 'pulse 1.5s infinite',
                       }}
                     />
-                    <span>VISTA is analyzing the technical context...</span>
+                    <span>
+                      {diagnosticState === 'uploading'
+                        ? 'Uploading image & diagnostic context...'
+                        : diagnosticState === 'analyzing'
+                        ? 'Analyzing visual screenshot & error telemetry...'
+                        : diagnosticState === 'responding'
+                        ? 'Formulating technical remediation plan...'
+                        : 'VISTA is analyzing the technical context...'}
+                    </span>
                   </div>
                 </div>
               )}
@@ -585,35 +685,152 @@ export default function App() {
           padding: '0.85rem 2rem',
           flexShrink: 0,
         }}
+        onDragOver={(e) => {
+          e.preventDefault()
+          setIsDragging(true)
+        }}
+        onDragLeave={() => setIsDragging(false)}
+        onDrop={(e) => {
+          e.preventDefault()
+          setIsDragging(false)
+          if (e.dataTransfer.files && e.dataTransfer.files.length > 0) {
+            processImageFile(e.dataTransfer.files[0])
+          }
+        }}
       >
         <div style={{ maxWidth: '900px', margin: '0 auto', display: 'flex', flexDirection: 'column', gap: '0.5rem' }}>
+          {/* Compact Image Preview before sending */}
+          {pendingAttachment && (
+            <div
+              style={{
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'space-between',
+                padding: '0.45rem 0.75rem',
+                backgroundColor: '#111d2e',
+                border: '1px solid #1e3a5f',
+                borderRadius: '8px',
+              }}
+            >
+              <div style={{ display: 'flex', alignItems: 'center', gap: '0.65rem' }}>
+                <img
+                  src={pendingAttachment.data}
+                  alt="Attachment thumbnail"
+                  style={{
+                    width: '38px',
+                    height: '38px',
+                    borderRadius: '6px',
+                    objectFit: 'cover',
+                    border: '1px solid rgba(255, 255, 255, 0.15)',
+                  }}
+                />
+                <div style={{ display: 'flex', flexDirection: 'column' }}>
+                  <span style={{ fontSize: '0.78rem', color: '#f8fafc', fontWeight: 600 }}>
+                    📷 {pendingAttachment.filename || 'Attached Screenshot'}
+                  </span>
+                  <span style={{ fontSize: '0.68rem', color: 'var(--text-muted)', fontFamily: 'var(--font-mono)' }}>
+                    {pendingAttachment.size_bytes ? `${(pendingAttachment.size_bytes / 1024).toFixed(1)} KB` : ''} · {pendingAttachment.mime_type}
+                  </span>
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() => setPendingAttachment(null)}
+                title="Remove attachment"
+                style={{
+                  backgroundColor: 'transparent',
+                  border: 'none',
+                  color: 'var(--text-muted)',
+                  fontSize: '0.85rem',
+                  cursor: 'pointer',
+                  padding: '0.2rem 0.5rem',
+                  borderRadius: '4px',
+                }}
+                onMouseOver={(e) => (e.currentTarget.style.color = 'var(--accent-rose)')}
+                onMouseOut={(e) => (e.currentTarget.style.color = 'var(--text-muted)')}
+              >
+                ✕ Remove
+              </button>
+            </div>
+          )}
+
+          {/* Textarea Box with drag highlight */}
           <div
             style={{
               display: 'flex',
               alignItems: 'flex-end',
-              backgroundColor: 'var(--bg-primary)',
-              border: '1px solid var(--border-subtle)',
+              backgroundColor: isDragging ? '#162235' : 'var(--bg-primary)',
+              border: isDragging ? '1px dashed var(--accent-cyan)' : '1px solid var(--border-subtle)',
               borderRadius: '10px',
               padding: '0.65rem 0.85rem',
-              transition: 'border-color 0.2s',
+              transition: 'border-color 0.2s, background-color 0.2s',
             }}
             onFocus={() => {
               const dock = textareaRef.current?.parentElement
-              if (dock) dock.style.borderColor = 'var(--border-active)'
+              if (dock && !isDragging) dock.style.borderColor = 'var(--border-active)'
             }}
             onBlur={() => {
               const dock = textareaRef.current?.parentElement
-              if (dock) dock.style.borderColor = 'var(--border-subtle)'
+              if (dock && !isDragging) dock.style.borderColor = 'var(--border-subtle)'
             }}
           >
+            {/* Hidden File Input */}
+            <input
+              type="file"
+              ref={fileInputRef}
+              onChange={(e) => {
+                if (e.target.files && e.target.files[0]) {
+                  processImageFile(e.target.files[0])
+                  e.target.value = ''
+                }
+              }}
+              accept="image/png,image/jpeg,image/webp"
+              style={{ display: 'none' }}
+            />
+
+            {/* Attach Image Button */}
+            <button
+              type="button"
+              onClick={() => fileInputRef.current?.click()}
+              disabled={loading}
+              title="Attach screenshot (PNG, JPEG, WEBP - Max 10MB) or Ctrl+V"
+              style={{
+                backgroundColor: pendingAttachment ? 'rgba(6, 182, 212, 0.15)' : 'transparent',
+                border: pendingAttachment ? '1px solid var(--accent-cyan)' : '1px solid transparent',
+                color: pendingAttachment ? 'var(--accent-cyan)' : 'var(--text-muted)',
+                padding: '0.5rem',
+                borderRadius: '6px',
+                cursor: 'pointer',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                marginRight: '0.5rem',
+                marginBottom: '2px',
+                transition: 'color 0.2s, border-color 0.2s',
+              }}
+              onMouseOver={(e) => {
+                if (!pendingAttachment) e.currentTarget.style.color = '#ffffff'
+              }}
+              onMouseOut={(e) => {
+                if (!pendingAttachment) e.currentTarget.style.color = 'var(--text-muted)'
+              }}
+            >
+              📎
+            </button>
+
             <textarea
               ref={textareaRef}
               rows={2}
               value={input}
               onChange={(e) => setInput(e.target.value)}
               onKeyDown={handleKeyDown}
+              onPaste={handlePaste}
               disabled={loading}
-              placeholder="Describe the bug, paste an error traceback, or ask a technical diagnostic question..."
+              placeholder={
+                pendingAttachment
+                  ? "Ask a technical question about this screenshot (or press Enter)..."
+                  : "Describe the bug, paste an error traceback, or Ctrl+V an error screenshot..."
+              }
               style={{
                 flex: 1,
                 backgroundColor: 'transparent',
@@ -630,19 +847,19 @@ export default function App() {
             />
             <button
               onClick={() => sendMessage()}
-              disabled={!input.trim() || loading}
+              disabled={(!input.trim() && !pendingAttachment) || loading}
               style={{
                 marginLeft: '0.75rem',
                 padding: '0.55rem 1rem',
-                backgroundColor: input.trim() && !loading ? 'var(--accent-blue)' : '#1e293b',
-                color: input.trim() && !loading ? '#ffffff' : 'var(--text-muted)',
+                backgroundColor: (input.trim() || pendingAttachment) && !loading ? 'var(--accent-blue)' : '#1e293b',
+                color: (input.trim() || pendingAttachment) && !loading ? '#ffffff' : 'var(--text-muted)',
                 borderRadius: '6px',
                 fontSize: '0.82rem',
                 fontWeight: 600,
                 display: 'flex',
                 alignItems: 'center',
                 gap: '0.4rem',
-                cursor: input.trim() && !loading ? 'pointer' : 'not-allowed',
+                cursor: (input.trim() || pendingAttachment) && !loading ? 'pointer' : 'not-allowed',
                 transition: 'background 0.2s',
               }}
             >
@@ -653,15 +870,16 @@ export default function App() {
 
           {/* Input helper & Voice/Vision hints */}
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', fontSize: '0.7rem', color: 'var(--text-muted)' }}>
-            <span>Enter ↵ to send · Shift+Enter for new line</span>
+            <span>Enter ↵ to send · Shift+Enter for new line · Ctrl+V to paste screenshot</span>
             <div style={{ display: 'flex', gap: '0.75rem' }}>
               <span>🎙 Voice (Phase 5)</span>
-              <span>📎 Vision (Phase 3)</span>
+              <span style={{ color: 'var(--accent-cyan)', fontWeight: 600 }}>📎 Vision Ready</span>
               <span>⚡ Controlled Tools (Phase 7)</span>
             </div>
           </div>
         </div>
       </footer>
+
     </div>
   )
 }

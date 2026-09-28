@@ -39,13 +39,75 @@ export function ChatMessageView({ message, modelName }: ChatMessageViewProps) {
             color: 'var(--text-primary)',
             fontSize: '0.9rem',
             lineHeight: 1.55,
-            whiteSpace: 'pre-wrap',
-            wordBreak: 'break-word',
             boxShadow: '0 2px 8px rgba(0, 0, 0, 0.25)',
+            display: 'flex',
+            flexDirection: 'column',
+            gap: '0.65rem',
           }}
         >
-          {message.content}
+          {message.attachments && message.attachments.length > 0 && (
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem' }}>
+              {message.attachments.map((att, idx) => {
+                const src = att.data.startsWith('data:')
+                  ? att.data
+                  : `data:${att.mime_type};base64,${att.data}`
+                const sizeLabel = att.size_bytes
+                  ? `${(att.size_bytes / 1024).toFixed(1)} KB`
+                  : null
+
+                return (
+                  <div
+                    key={idx}
+                    style={{
+                      borderRadius: '8px',
+                      overflow: 'hidden',
+                      backgroundColor: 'rgba(0, 0, 0, 0.35)',
+                      border: '1px solid rgba(255, 255, 255, 0.12)',
+                    }}
+                  >
+                    <div
+                      style={{
+                        padding: '0.35rem 0.65rem',
+                        fontSize: '0.72rem',
+                        color: 'var(--accent-cyan)',
+                        display: 'flex',
+                        alignItems: 'center',
+                        justifyContent: 'space-between',
+                        backgroundColor: 'rgba(0, 0, 0, 0.3)',
+                        borderBottom: '1px solid rgba(255, 255, 255, 0.08)',
+                      }}
+                    >
+                      <span style={{ display: 'flex', alignItems: 'center', gap: '0.4rem' }}>
+                        <span>📷</span>
+                        <strong>{att.filename || 'Attached Screenshot'}</strong>
+                      </span>
+                      {sizeLabel && (
+                        <span style={{ color: 'var(--text-muted)', fontFamily: 'var(--font-mono)' }}>
+                          {sizeLabel}
+                        </span>
+                      )}
+                    </div>
+                    <img
+                      src={src}
+                      alt={att.filename || 'Attached technical screenshot'}
+                      style={{
+                        maxWidth: '100%',
+                        maxHeight: '360px',
+                        display: 'block',
+                        objectFit: 'contain',
+                        backgroundColor: '#0a0f18',
+                      }}
+                    />
+                  </div>
+                )
+              })}
+            </div>
+          )}
+          <div style={{ whiteSpace: 'pre-wrap', wordBreak: 'break-word' }}>
+            {message.content}
+          </div>
         </div>
+
       </div>
     )
   }

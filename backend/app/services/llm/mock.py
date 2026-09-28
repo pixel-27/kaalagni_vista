@@ -23,8 +23,82 @@ class MockProvider(BaseLLMProvider):
         if not messages:
             return "No input provided. Please share the technical problem or error you are diagnosing.", target_model, "stop"
 
-        last_user_msg = next((m.content for m in reversed(messages) if m.role == "user"), "").lower()
+        last_user_msg_obj = next((m for m in reversed(messages) if m.role == "user"), None)
+        last_user_msg = last_user_msg_obj.content.lower() if last_user_msg_obj else ""
         full_conversation = " ".join([m.content.lower() for m in messages])
+
+        # Multimodal Turn: Current message contains visual attachments
+        if last_user_msg_obj and last_user_msg_obj.attachments:
+            num_att = len(last_user_msg_obj.attachments)
+            att_types = ", ".join(a.mime_type for a in last_user_msg_obj.attachments)
+
+            if "keyerror" in full_conversation or "user_id" in full_conversation:
+                response = (
+                    "### Visual Diagnostic Analysis (Mock)\n\n"
+                    "Mock visual analysis received successfully.\n\n"
+                    f"**Visual Evidence Inspection ({num_att} image(s) [{att_types}]):**\n"
+                    "- Visible traceback indicates an unhandled `KeyError: 'user_id'`.\n"
+                    "- Failure occurred during request payload dictionary indexing.\n\n"
+                    "**Root Cause:**\n"
+                    "The application accessed `data['user_id']` without verifying presence of the key.\n\n"
+                    "**Immediate Recommendation:**\n"
+                    "Use `.get('user_id')` or parse the request through a typed Pydantic schema."
+                )
+                return response, target_model, "stop"
+            elif "500" in full_conversation or "fastapi" in full_conversation:
+                response = (
+                    "### Visual Diagnostic Analysis (Mock)\n\n"
+                    "Mock visual analysis received successfully.\n\n"
+                    f"**Visual Evidence Inspection ({num_att} image(s) [{att_types}]):**\n"
+                    "- Server console indicates HTTP 500 Internal Server Error.\n"
+                    "- Unhandled exception detected in active router pipeline.\n\n"
+                    "**Recommended Action:**\n"
+                    "Inspect the traceback line numbers shown in the console to isolate the failing function."
+                )
+                return response, target_model, "stop"
+            else:
+                response = (
+                    "### Visual Diagnostic Analysis (Mock)\n\n"
+                    "Mock visual analysis received successfully.\n\n"
+                    "**Visual Evidence Inspection:**\n"
+                    f"- Received and verified {num_att} visual attachment(s) [{att_types}].\n"
+                    "- Visual diagnostic context successfully processed alongside your prompt.\n\n"
+                    "**Context Observation:**\n"
+                    f"Based on your query: `{last_user_msg_obj.content}` and the provided visual screenshot, "
+                    "the system has established initial diagnostic telemetry."
+                )
+                return response, target_model, "stop"
+
+        # Multi-turn Follow-up: Prior message had visual attachments
+        prior_has_attachments = any(bool(m.attachments) for m in messages[:-1])
+        if prior_has_attachments and ("fix" in last_user_msg or "how" in last_user_msg or "solve" in last_user_msg):
+            if "keyerror" in full_conversation or "user_id" in full_conversation:
+                response = (
+                    "### Resolution for Previously Identified `KeyError: 'user_id'`\n\n"
+                    "Based on the error screenshot provided in the previous turn, here is the recommended fix:\n\n"
+                    "1. **Use Pydantic Request Models (Best Practice)**:\n"
+                    "   ```python\n"
+                    "   from pydantic import BaseModel\n\n"
+                    "   class UserPayload(BaseModel):\n"
+                    "       user_id: str\n"
+                    "   ```\n"
+                    "2. **Safe Fallback with `.get()`**:\n"
+                    "   ```python\n"
+                    "   user_id = data.get('user_id')\n"
+                    "   if not user_id:\n"
+                    "       raise HTTPException(status_code=400, detail='Missing user_id')\n"
+                    "   ```"
+                )
+                return response, target_model, "stop"
+            else:
+                response = (
+                    "### Resolution for Previously Attached Error\n\n"
+                    "Following up on the error screenshot analyzed in the previous turn:\n\n"
+                    "1. Review the failing module identified in the initial visual analysis.\n"
+                    "2. Verify input arguments and validate environment configuration.\n"
+                    "3. Rerun the affected endpoint or test suite to confirm resolution."
+                )
+                return response, target_model, "stop"
 
         # Scenario 1: FastAPI 500 error multi-turn
         if "keyerror" in full_conversation and ("user_id" in full_conversation or "500" in full_conversation):

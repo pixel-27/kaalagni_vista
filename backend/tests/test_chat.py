@@ -123,3 +123,279 @@ async def test_chat_provider_upstream_error_handling():
             )
         assert res.status_code == 502
         assert "AI Provider Error" in res.json()["detail"]
+
+# --- Phase 3 Multimodal Tests ---
+
+VALID_PNG_B64 = "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFWM0AAAACklEQVR4nGMAAQAABQABDQottAAAAABJRU5ErkKC"
+VALID_JPEG_B64 = "/9j/4AAQSkZJRgABAQEASABIAAD/2wBDAAgGBgcGBQgHBwcJCQgKDBQNDAsLDBkSEw8UHRofHh0aHBwgJC4nICIsIxwcKDcpLDAxNDQ0Hyc5PTgyPC4zNDH/wAALCAABAAEBAREA/8QAHwAAAQUBAQEBAQEAAAAAAAAAAAECAwQFBgcICQoL/9oACAEBAAA/AL8A/9k="
+VALID_WEBP_B64 = "UklGRhoAAABXRUJQVlA4TA4AAAAvAAAAAACIiAgAAAAAAA=="
+
+@pytest.mark.asyncio
+async def test_chat_multimodal_png_attachment_accepted():
+    """Chat endpoint accepts user messages with a valid PNG screenshot."""
+    with patch("app.api.chat.get_llm_provider", return_value=MockProvider()):
+        async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+            res = await client.post(
+                "/api/chat",
+                json={
+                    "messages": [
+                        {
+                            "role": "user",
+                            "content": "VISTA, look at this error and tell me what's wrong.",
+                            "attachments": [
+                                {
+                                    "mime_type": "image/png",
+                                    "data": f"data:image/png;base64,{VALID_PNG_B64}",
+                                    "filename": "error_screen.png",
+                                }
+                            ],
+                        }
+                    ]
+                },
+            )
+        assert res.status_code == 200
+        data = res.json()
+        assert data["provider"] == "mock"
+        assert "Mock visual analysis received successfully" in data["message"]["content"]
+
+@pytest.mark.asyncio
+async def test_chat_multimodal_supported_mime_types():
+    """Chat endpoint supports image/png, image/jpeg, and image/webp formats."""
+    with patch("app.api.chat.get_llm_provider", return_value=MockProvider()):
+        async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+            for mime_type, b64_data in [
+                ("image/png", VALID_PNG_B64),
+                ("image/jpeg", VALID_JPEG_B64),
+                ("image/webp", VALID_WEBP_B64),
+            ]:
+                res = await client.post(
+                    "/api/chat",
+                    json={
+                        "messages": [
+                            {
+                                "role": "user",
+                                "content": "Analyze this attachment",
+                                "attachments": [
+                                    {
+                                        "mime_type": mime_type,
+                                        "data": b64_data,
+                                        "filename": f"sample.{mime_type.split('/')[1]}",
+                                    }
+                                ],
+                            }
+                        ]
+                    },
+                )
+                assert res.status_code == 200, f"Failed for MIME type: {mime_type}"
+
+@pytest.mark.asyncio
+async def test_chat_unsupported_mime_type_rejected():
+    """Chat endpoint rejects unsupported image types cleanly with 400 Bad Request."""
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+        res = await client.post(
+            "/api/chat",
+            json={
+                "messages": [
+                    {
+                        "role": "user",
+                        "content": "Look at this GIF",
+                        "attachments": [
+                            {
+                                "mime_type": "image/gif",
+                                "data": "R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBRAA7",
+                                "filename": "animation.gif",
+                            }
+                        ],
+                    }
+                ]
+            },
+        )
+    assert res.status_code == 400
+    assert "Unsupported image MIME type" in res.json()["detail"]
+
+@pytest.mark.asyncio
+async def test_chat_oversized_image_rejected():
+    """Chat endpoint rejects image payloads exceeding 10MB."""
+    import base64
+    raw_oversized = b"\x89PNG\r\n\x1a\n\x00\x00\x00\rIHDR" + b"\x00" * (11 * 1024 * 1024)
+    large_b64 = base64.b64encode(raw_oversized).decode()
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+        res = await client.post(
+            "/api/chat",
+            json={
+                "messages": [
+                    {
+                        "role": "user",
+                        "content": "Analyze huge screenshot",
+                        "attachments": [
+                            {
+                                "mime_type": "image/png",
+                                "data": large_b64,
+                                "filename": "giant.png",
+                            }
+                        ],
+                    }
+                ]
+            },
+        )
+    assert res.status_code == 400
+    assert "exceeds the 10MB limit" in res.json()["detail"]
+
+
+@pytest.mark.asyncio
+async def test_chat_malformed_base64_rejected():
+    """Chat endpoint rejects malformed/corrupt base64 string data."""
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+        res = await client.post(
+            "/api/chat",
+            json={
+                "messages": [
+                    {
+                        "role": "user",
+                        "content": "Analyze bad base64",
+                        "attachments": [
+                            {
+                                "mime_type": "image/png",
+                                "data": "!!!NOT_VALID_BASE64###",
+                                "filename": "bad.png",
+                            }
+                        ],
+                    }
+                ]
+            },
+        )
+    assert res.status_code == 400
+    assert "Malformed base64" in res.json()["detail"]
+
+@pytest.mark.asyncio
+async def test_chat_corrupt_magic_bytes_rejected():
+    """Chat endpoint rejects files where declared MIME does not match magic byte signature."""
+    import base64
+    fake_png = base64.b64encode(b"THIS_IS_NOT_A_PNG_FILE_HEADER").decode()
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+        res = await client.post(
+            "/api/chat",
+            json={
+                "messages": [
+                    {
+                        "role": "user",
+                        "content": "Check this masquerading file",
+                        "attachments": [
+                            {
+                                "mime_type": "image/png",
+                                "data": fake_png,
+                                "filename": "fake.png",
+                            }
+                        ],
+                    }
+                ]
+            },
+        )
+    assert res.status_code == 400
+    assert "Image header does not match" in res.json()["detail"]
+
+@pytest.mark.asyncio
+async def test_chat_gemini_multimodal_conversion():
+    """Gemini provider formats visual attachments as inlineData parts."""
+    from app.models.chat import ChatMessage, ImageAttachment
+    gemini = GeminiProvider(api_key="mock_key")
+    messages = [
+        ChatMessage(
+            role="user",
+            content="Check traceback",
+            attachments=[
+                ImageAttachment(
+                    mime_type="image/png",
+                    data=VALID_PNG_B64,
+                    filename="trace.png",
+                )
+            ],
+        )
+    ]
+    contents = gemini._convert_messages(messages)
+    assert len(contents) == 1
+    parts = contents[0]["parts"]
+    assert len(parts) == 2
+    assert "inlineData" in parts[0]
+    assert parts[0]["inlineData"]["mimeType"] == "image/png"
+    assert parts[0]["inlineData"]["data"] == VALID_PNG_B64
+    assert parts[1]["text"] == "Check traceback"
+
+@pytest.mark.asyncio
+async def test_chat_openai_multimodal_conversion():
+    """OpenAI provider formats visual attachments as image_url content items."""
+    from app.services.llm import OpenAIProvider
+    from app.models.chat import ChatMessage, ImageAttachment
+    openai_provider = OpenAIProvider(api_key="mock_key")
+    messages = [
+        ChatMessage(
+            role="user",
+            content="Check traceback",
+            attachments=[
+                ImageAttachment(
+                    mime_type="image/png",
+                    data=VALID_PNG_B64,
+                    filename="trace.png",
+                )
+            ],
+        )
+    ]
+    # Verify OpenAI converts to multi-part message content
+    with patch("httpx.AsyncClient.post") as mock_post:
+        # Mock 200 response
+        class MockResponse:
+            status_code = 200
+            def json(self):
+                return {
+                    "choices": [
+                        {"message": {"content": "OpenAI visual analysis complete"}, "finish_reason": "stop"}
+                    ]
+                }
+        mock_post.return_value = MockResponse()
+        res, model, reason = await openai_provider.generate_response(
+            messages=messages,
+            system_instruction="System instruction",
+        )
+        assert res == "OpenAI visual analysis complete"
+        # Check payload passed to httpx post
+        called_kwargs = mock_post.call_args[1]
+        sent_messages = called_kwargs["json"]["messages"]
+        user_msg = sent_messages[1]
+        assert isinstance(user_msg["content"], list)
+        assert user_msg["content"][0]["type"] == "text"
+        assert user_msg["content"][1]["type"] == "image_url"
+        assert "data:image/png;base64," in user_msg["content"][1]["image_url"]["url"]
+
+@pytest.mark.asyncio
+async def test_chat_multi_turn_with_image_context():
+    """Chat endpoint preserves visual context across multi-turn follow-up queries."""
+    history = [
+        {
+            "role": "user",
+            "content": "What is wrong with this API? Look at the KeyError traceback.",
+            "attachments": [
+                {
+                    "mime_type": "image/png",
+                    "data": VALID_PNG_B64,
+                    "filename": "keyerror_trace.png",
+                }
+            ],
+        },
+        {
+            "role": "assistant",
+            "content": "The traceback indicates a KeyError for user_id during dictionary access.",
+        },
+        {
+            "role": "user",
+            "content": "How should I fix it?",
+        },
+    ]
+    with patch("app.api.chat.get_llm_provider", return_value=MockProvider()):
+        async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+            res = await client.post("/api/chat", json={"messages": history})
+        assert res.status_code == 200
+        data = res.json()
+        content = data["message"]["content"]
+        assert "KeyError: 'user_id'" in content
+        assert "Pydantic" in content or "get" in content
+

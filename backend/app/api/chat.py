@@ -1,7 +1,7 @@
 import logging
 from datetime import datetime, timezone
 from fastapi import APIRouter, HTTPException, status
-from app.models.chat import ChatRequest, ChatResponse, ChatMessage
+from app.models.chat import ChatRequest, ChatResponse, ChatMessage, ImageAttachment
 from app.services.llm import (
     get_llm_provider,
     LLMConfigError,
@@ -9,6 +9,7 @@ from app.services.llm import (
     LLMProviderError,
     LLMError,
 )
+from app.services.vision_validator import sanitize_and_validate_image, ImageValidationError
 from app.core.prompts import VISTA_SYSTEM_PROMPT
 
 logger = logging.getLogger(__name__)
@@ -18,8 +19,8 @@ router = APIRouter(prefix="/chat", tags=["Chat"])
 async def send_chat_message(request: ChatRequest) -> ChatResponse:
     """
     Process a technical troubleshooting conversation turn with VISTA.
-    Takes conversation history, applies VISTA system instructions, and returns
-    the assistant's technical diagnostic response.
+    Takes conversation history, validates text and visual inputs, applies VISTA system instructions,
+    and returns the assistant's technical diagnostic response.
     """
     if not request.messages:
         raise HTTPException(
@@ -35,7 +36,34 @@ async def send_chat_message(request: ChatRequest) -> ChatResponse:
             detail="The final message in the conversation history must be from the 'user'.",
         )
 
+    # Validate and sanitize all visual attachments in conversation history
+    for msg_idx, msg in enumerate(request.messages):
+        if msg.attachments:
+            cleaned_attachments = []
+            for att_idx, att in enumerate(msg.attachments):
+                try:
+                    norm_mime, clean_data, size_bytes = sanitize_and_validate_image(
+                        mime_type=att.mime_type,
+                        data=att.data,
+                    )
+                    cleaned_attachments.append(
+                        ImageAttachment(
+                            mime_type=norm_mime,
+                            data=clean_data,
+                            filename=att.filename,
+                            size_bytes=size_bytes,
+                        )
+                    )
+                except ImageValidationError as exc:
+                    logger.warning("Image validation failed for message %d attachment %d: %s", msg_idx, att_idx, exc)
+                    raise HTTPException(
+                        status_code=status.HTTP_400_BAD_REQUEST,
+                        detail=f"Invalid image attachment: {str(exc)}",
+                    )
+            msg.attachments = cleaned_attachments
+
     provider = get_llm_provider()
+
 
     try:
         response_text, model_used, finish_reason = await provider.generate_response(

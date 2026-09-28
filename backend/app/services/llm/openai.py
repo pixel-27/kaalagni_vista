@@ -35,9 +35,23 @@ class OpenAIProvider(BaseLLMProvider):
         temp = temperature if temperature is not None else settings.LLM_TEMPERATURE
         url = "https://api.openai.com/v1/chat/completions"
 
-        api_messages: List[Dict[str, str]] = [{"role": "system", "content": system_instruction}]
+        api_messages: List[Dict[str, Any]] = [{"role": "system", "content": system_instruction}]
         for m in messages:
-            api_messages.append({"role": m.role, "content": m.content})
+            if not m.attachments:
+                api_messages.append({"role": m.role, "content": m.content})
+            else:
+                parts: List[Dict[str, Any]] = [{"type": "text", "text": m.content}]
+                for att in m.attachments:
+                    data_url = f"data:{att.mime_type};base64,{att.data}"
+                    parts.append({
+                        "type": "image_url",
+                        "image_url": {
+                            "url": data_url,
+                            "detail": "auto",
+                        },
+                    })
+                api_messages.append({"role": m.role, "content": parts})
+
 
         headers = {
             "Authorization": f"Bearer {self.api_key}",
