@@ -59,12 +59,121 @@ export interface ChatMessage {
   timestamp?: string
 }
 
+// Phase 7 Diagnostic Types
+export type DiagnosticStateName =
+  | 'IDLE'
+  | 'OBSERVING'
+  | 'ANALYZING'
+  | 'FORMING_HYPOTHESES'
+  | 'PLANNING_INVESTIGATION'
+  | 'INVESTIGATING'
+  | 'AWAITING_APPROVAL'
+  | 'VERIFYING'
+  | 'DIAGNOSING'
+  | 'RESOLVED'
+  | 'INCONCLUSIVE'
+
+export type EvidenceClassification = 'OBSERVED' | 'VERIFIED' | 'LIKELY' | 'UNKNOWN'
+export type EvidenceSource = 'user_input' | 'screenshot' | 'screen_context' | 'tool_output' | 'inference'
+export type HypothesisStatus = 'candidate' | 'supported' | 'contradicted' | 'verified' | 'unresolved'
+export type StepStatus = 'pending' | 'running' | 'completed' | 'skipped' | 'failed'
+export type DiagnosisStatus = 'verified' | 'likely' | 'unresolved' | 'inconclusive'
+export type ChallengeOutcome = 'reaffirmed' | 'revised' | 'uncertain'
+
+export interface EvidenceItem {
+  id: string
+  claim: string
+  classification: EvidenceClassification
+  source: EvidenceSource
+  tool_call_id?: string
+  tool_name?: string
+  details?: string
+  timestamp: string
+}
+
+export interface Hypothesis {
+  id: string
+  description: string
+  status: HypothesisStatus
+  supporting_evidence: string[]
+  contradicting_evidence: string[]
+  verification_needed?: string
+  likelihood?: string
+}
+
+export interface InvestigationStep {
+  step_num: number
+  action: string
+  tool_needed?: string
+  target?: string
+  status: StepStatus
+  note?: string
+}
+
+export interface InvestigationPlan {
+  goal: string
+  steps: InvestigationStep[]
+}
+
+export interface DiagnosticReport {
+  diagnosis: string
+  summary: string
+  status: DiagnosisStatus
+  observed_facts: string[]
+  verified_facts: string[]
+  explanation: string
+  recommended_fix: string[]
+  verification_step?: string
+}
+
+export interface ChallengeReport {
+  challenged_at: string
+  previous_diagnosis: string
+  new_diagnosis: string
+  outcome: ChallengeOutcome
+  rationale: string
+  alternative_considered: string
+  alternative_status: string
+}
+
+export interface TimelineEvent {
+  id: string
+  stage: string
+  state: DiagnosticStateName
+  description: string
+  timestamp: string
+  status: 'completed' | 'active' | 'pending' | 'failed'
+}
+
+export interface DiagnosticSession {
+  session_id: string
+  current_state: DiagnosticStateName
+  observations: string[]
+  evidence: EvidenceItem[]
+  hypotheses: Hypothesis[]
+  leading_hypothesis_id?: string
+  plan?: InvestigationPlan
+  timeline: TimelineEvent[]
+  report?: DiagnosticReport
+  challenge?: ChallengeReport
+  updated_at: string
+}
+
+export interface ChatRequest {
+  messages: ChatMessage[]
+  temperature?: number
+  model?: string
+  challenge_diagnosis?: boolean
+  diagnostic_session?: DiagnosticSession
+}
+
 export interface ChatResponse {
   message: ChatMessage
   provider: string
   model: string
   timestamp: string
   finish_reason?: string
+  diagnostic_session?: DiagnosticSession
 }
 
 export interface ToolExecuteRequest {

@@ -41,6 +41,8 @@ class ChatMessage(BaseModel):
     timestamp: Optional[str] = Field(default_factory=lambda: datetime.now(timezone.utc).isoformat())
 
 
+from app.services.diagnostic.models import DiagnosticSession
+
 class ChatRequest(BaseModel):
     messages: List[ChatMessage] = Field(
         ...,
@@ -50,6 +52,14 @@ class ChatRequest(BaseModel):
     )
     temperature: Optional[float] = Field(None, ge=0.0, le=2.0, description="Sampling temperature")
     model: Optional[str] = Field(None, description="Optional override for model identifier")
+    challenge_diagnosis: Optional[bool] = Field(
+        default=False,
+        description="Whether this turn represents a challenge/re-evaluation request for the active diagnosis",
+    )
+    diagnostic_session: Optional[DiagnosticSession] = Field(
+        default=None,
+        description="Optional active diagnostic session from previous turns",
+    )
 
 class ChatResponse(BaseModel):
     message: ChatMessage
@@ -57,4 +67,9 @@ class ChatResponse(BaseModel):
     model: str = Field(..., description="Model identifier used")
     timestamp: str = Field(default_factory=lambda: datetime.now(timezone.utc).isoformat())
     finish_reason: Optional[str] = Field("stop", description="Reason model stopped generating ('stop' or 'tool_calls')")
+    diagnostic_session: Optional[DiagnosticSession] = Field(
+        default=None,
+        description="Structured Phase 7 diagnostic investigation session",
+    )
+
 
