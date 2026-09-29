@@ -65,6 +65,38 @@ async def send_chat_message(request: ChatRequest) -> ChatResponse:
 
     provider = get_llm_provider()
 
+    # Check for diagnosis challenge request
+    is_challenge = bool(request.challenge_diagnosis)
+    if not is_challenge and request.messages:
+        last_user = next((m for m in reversed(request.messages) if m.role == "user"), None)
+        if last_user and any(phrase in last_user.content.lower() for phrase in ["challenge diagnosis", "challenge my diagnosis", "are you sure?"]):
+            is_challenge = True
+
+    if is_challenge:
+        from app.services.diagnostic import DiagnosticAgent, DiagnosticStateManager, EvidenceStore, HypothesisManager
+        session = request.diagnostic_session or DiagnosticStateManager.create_session()
+        evidence_store = EvidenceStore(session.evidence)
+        hypothesis_mgr = HypothesisManager(session.hypotheses)
+        resp_text, tool_calls, updated_session, finish_reason = await DiagnosticAgent.handle_challenge(
+            session=session,
+            messages=request.messages,
+            evidence_store=evidence_store,
+            hypothesis_mgr=hypothesis_mgr,
+        )
+        return ChatResponse(
+            message=ChatMessage(
+                role="assistant",
+                content=resp_text,
+                tool_calls=tool_calls,
+                timestamp=datetime.now(timezone.utc).isoformat(),
+            ),
+            provider=provider.provider_name,
+            model=request.model or "vista-diagnostic-agent",
+            timestamp=datetime.now(timezone.utc).isoformat(),
+            finish_reason=finish_reason,
+            diagnostic_session=updated_session,
+        )
+
     try:
         response_text, model_used, finish_reason = await provider.generate_response(
             messages=request.messages,
@@ -79,6 +111,15 @@ async def send_chat_message(request: ChatRequest) -> ChatResponse:
             finish_reason = "tool_calls"
             response_text = clean_text or "I have requested a diagnostic tool to investigate."
 
+        # Synchronize Phase 7 Diagnostic Session
+        from app.services.diagnostic import DiagnosticAgent
+        diagnostic_session = DiagnosticAgent.build_session_from_turn(
+            session=request.diagnostic_session,
+            messages=request.messages,
+            response_text=response_text,
+            tool_calls=tool_calls,
+        )
+
         return ChatResponse(
             message=ChatMessage(
                 role="assistant",
@@ -90,7 +131,9 @@ async def send_chat_message(request: ChatRequest) -> ChatResponse:
             model=model_used,
             timestamp=datetime.now(timezone.utc).isoformat(),
             finish_reason=finish_reason,
+            diagnostic_session=diagnostic_session,
         )
+
 
     except LLMConfigError as exc:
         logger.warning("LLM configuration error: %s", exc)
