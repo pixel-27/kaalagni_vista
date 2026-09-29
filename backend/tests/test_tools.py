@@ -34,6 +34,24 @@ async def test_tool_registry_rejects_unknown():
     assert registry.get_tool("nonexistent") is None
 
 @pytest.mark.asyncio
+async def test_execute_unknown_tool_rejected_at_api_level():
+    """POST /api/tools/execute strictly rejects unknown or unregistered tools directly at the API level."""
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+        res = await client.post(
+            "/api/tools/execute",
+            json={
+                "call_id": "call_unknown_direct",
+                "tool": "malicious_or_unknown_tool",
+                "arguments": {"cmd": "whoami"},
+            },
+        )
+    assert res.status_code == 200
+    data = res.json()["result"]
+    assert data["status"] == "error"
+    assert "Unknown or unregistered tool" in data["error"]
+
+
+@pytest.mark.asyncio
 async def test_read_file_valid_workspace_file():
     """read_file safely reads lines from a valid project file within workspace root."""
     async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
