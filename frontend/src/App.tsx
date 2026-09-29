@@ -1,5 +1,7 @@
 import { useState, useEffect, useRef } from 'react'
 import { ChatMessageView } from './components/ChatMessageView'
+import { DiagnosticTimeline } from './components/DiagnosticTimeline'
+import { EvidencePanel } from './components/EvidencePanel'
 import type {
   ChatMessage,
   ChatResponse,
@@ -10,6 +12,7 @@ import type {
   InputMode,
   ScreenCaptureState,
   ToolCall,
+  DiagnosticSession,
 } from './types'
 import {
   VoiceRecognitionController,
@@ -22,6 +25,7 @@ import {
   isScreenCaptureSupported,
 } from './services/screen'
 import { executeTool } from './services/tools'
+
 
 
 const QUICK_STARTERS = [
@@ -92,10 +96,15 @@ export default function App() {
     label?: string
   } | null>(null)
 
+  // Phase 7: Controlled Diagnostic System state
+  const [diagnosticSession, setDiagnosticSession] = useState<DiagnosticSession | null>(null)
+  const [isChallenging, setIsChallenging] = useState(false)
+
   // Health telemetry state (preserved from Phase 1)
   const [health, setHealth] = useState<HealthData | null>(null)
   const [healthStatus, setHealthStatus] = useState<'checking' | 'connected' | 'error'>('checking')
   const [latency, setLatency] = useState<number | null>(null)
+
 
   const messagesEndRef = useRef<HTMLDivElement>(null)
   const textareaRef = useRef<HTMLTextAreaElement>(null)
@@ -329,7 +338,7 @@ export default function App() {
     }
   }
 
-  const dispatchChatTurn = async (chatHistory: ChatMessage[]): Promise<ChatResponse> => {
+  const dispatchChatTurn = async (chatHistory: ChatMessage[], challenge: boolean = false): Promise<ChatResponse> => {
     let res: Response
     const payload = {
       messages: chatHistory.map((m) => ({
@@ -341,6 +350,8 @@ export default function App() {
         tool_call_id: m.tool_call_id,
         tool_result: m.tool_result,
       })),
+      challenge_diagnosis: challenge,
+      diagnostic_session: diagnosticSession || undefined,
     }
 
     try {
@@ -371,10 +382,41 @@ export default function App() {
     return res.json()
   }
 
+  const handleChallengeDiagnosis = async () => {
+    if (loading || isChallenging || messages.length === 0) return
+    setIsChallenging(true)
+    setError(null)
+    setDiagnosticState('analyzing')
+
+    try {
+      const challengeResponse = await dispatchChatTurn(messages, true)
+      if (challengeResponse.diagnostic_session) {
+        setDiagnosticSession(challengeResponse.diagnostic_session)
+      }
+      const nextHistory = [...messages, challengeResponse.message]
+      setMessages(nextHistory)
+      setLastModelUsed(`${challengeResponse.provider} · ${challengeResponse.model}`)
+      if (autoSpeak && challengeResponse.message.content) {
+        synthesisRef.current?.speak(challengeResponse.message.content)
+        setCurrentlySpeakingText(challengeResponse.message.content)
+      }
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : 'Failed to challenge diagnosis'
+      setError(msg)
+    } finally {
+      setIsChallenging(false)
+      setDiagnosticState('idle')
+    }
+  }
+
   const handleChatResponse = async (data: ChatResponse, currentHistory: ChatMessage[]) => {
     const nextHistory = [...currentHistory, data.message]
     setMessages(nextHistory)
     setLastModelUsed(`${data.provider} · ${data.model}`)
+
+    if (data.diagnostic_session) {
+      setDiagnosticSession(data.diagnostic_session)
+    }
 
     // Check if assistant requested controlled diagnostic tool(s)
     if (data.message.tool_calls && data.message.tool_calls.length > 0) {
@@ -399,6 +441,7 @@ export default function App() {
       }
     }
   }
+
 
   const executeReadOnlyTool = async (call: ToolCall, historySoFar: ChatMessage[]) => {
     setActiveToolActivity({
@@ -504,10 +547,12 @@ export default function App() {
       setPendingAttachment(null)
       setScreenErrorMessage(null)
       setVoiceErrorMessage(null)
+      setDiagnosticSession(null)
       setMessages([])
       setError(null)
     }
   }
+
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', height: '100vh', overflow: 'hidden' }}>
@@ -898,6 +943,20 @@ export default function App() {
           ) : (
             /* Message List */
             <div style={{ display: 'flex', flexDirection: 'column' }}>
+              {diagnosticSession && (
+                <>
+                  <DiagnosticTimeline
+                    timeline={diagnosticSession.timeline}
+                    currentState={diagnosticSession.current_state}
+                  />
+                  <EvidencePanel
+                    session={diagnosticSession}
+                    onChallengeDiagnosis={handleChallengeDiagnosis}
+                    isChallenging={isChallenging}
+                  />
+                </>
+              )}
+
               {messages.map((m, idx) => (
                 <ChatMessageView
                   key={idx}
@@ -907,6 +966,7 @@ export default function App() {
                   isSpeaking={voicePlayState === 'speaking' && currentlySpeakingText === m.content}
                 />
               ))}
+
 
               {/* Thinking / Analyzing Indicator */}
               {loading && (
@@ -1109,66 +1169,72 @@ export default function App() {
             </div>
           )}
 
-          {/* Phase 6: Diagnostic Tool Confirmation Card (for execution tools like run_test) */}
+          {/* Phase 6 & 7: Controlled Tool Confirmation Modal (Execution Tools) */}
           {pendingToolCall && (
             <div
               style={{
                 display: 'flex',
                 flexDirection: 'column',
-                gap: '0.65rem',
-                padding: '0.9rem 1.15rem',
-                backgroundColor: 'rgba(167, 139, 250, 0.12)',
-                border: '1px solid rgba(167, 139, 250, 0.5)',
+                gap: '0.75rem',
+                padding: '1rem 1.25rem',
+                backgroundColor: 'rgba(239, 68, 68, 0.08)',
+                border: '1px solid rgba(239, 68, 68, 0.45)',
                 borderRadius: '10px',
-                boxShadow: '0 4px 16px rgba(0, 0, 0, 0.35)',
+                boxShadow: '0 8px 24px rgba(0, 0, 0, 0.4)',
               }}
             >
               <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-                <span style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', fontWeight: 600, color: '#f1f5f9', fontSize: '0.86rem' }}>
-                  <span>🧪</span>
-                  <span>VISTA requests permission to execute diagnostic test:</span>
-                </span>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+                  <span style={{ fontSize: '1.1rem' }}>🛡️</span>
+                  <span style={{ fontSize: '0.92rem', fontWeight: 700, color: '#f8fafc' }}>
+                    VISTA wants to verify this diagnosis
+                  </span>
+                </div>
                 <span
                   style={{
                     fontSize: '0.68rem',
                     fontFamily: 'var(--font-mono)',
-                    padding: '0.15rem 0.5rem',
+                    padding: '0.2rem 0.55rem',
                     borderRadius: '4px',
-                    backgroundColor: 'rgba(245, 158, 11, 0.25)',
-                    color: '#fbbf24',
-                    border: '1px solid rgba(245, 158, 11, 0.45)',
-                    fontWeight: 600,
+                    backgroundColor: 'rgba(239, 68, 68, 0.25)',
+                    color: '#fca5a5',
+                    fontWeight: 700,
+                    letterSpacing: '0.04em',
                   }}
                 >
-                  REQUIRES CONFIRMATION
+                  HUMAN CONFIRMATION REQUIRED
                 </span>
               </div>
 
               <div
                 style={{
-                  fontSize: '0.8rem',
-                  color: '#cbd5e1',
-                  backgroundColor: 'rgba(0, 0, 0, 0.35)',
-                  padding: '0.55rem 0.85rem',
-                  borderRadius: '6px',
-                  border: '1px solid rgba(255, 255, 255, 0.08)',
                   display: 'flex',
                   flexDirection: 'column',
-                  gap: '0.25rem',
-                  fontFamily: 'var(--font-mono)',
+                  gap: '0.5rem',
+                  fontSize: '0.82rem',
+                  backgroundColor: 'rgba(0, 0, 0, 0.4)',
+                  padding: '0.75rem 1rem',
+                  borderRadius: '8px',
+                  border: '1px solid rgba(255, 255, 255, 0.08)',
                 }}
               >
                 <div>
-                  <span style={{ color: 'var(--text-muted)' }}>Target: </span>
-                  <strong style={{ color: 'var(--accent-cyan)' }}>{String(pendingToolCall.arguments.test_target || '')}</strong>
+                  <span style={{ color: '#94a3b8', fontWeight: 600 }}>Action: </span>
+                  <strong style={{ color: 'var(--accent-cyan)' }}>
+                    Run {pendingToolCall.arguments.test_target === 'backend_tests' ? 'Backend Test Suite' : pendingToolCall.arguments.test_target === 'frontend_tests' ? 'Frontend Unit Tests' : 'Frontend Production Build'} ({String(pendingToolCall.arguments.test_target || '')})
+                  </strong>
                 </div>
                 <div>
-                  <span style={{ color: 'var(--text-muted)' }}>Scope: </span>
-                  <span>Allowlisted project test suite execution within workspace sandbox</span>
+                  <span style={{ color: '#94a3b8', fontWeight: 600 }}>Purpose: </span>
+                  <span style={{ color: '#e2e8f0' }}>Verify whether the suspected backend issue is reproducible.</span>
+                </div>
+                <div>
+                  <span style={{ color: '#94a3b8', fontWeight: 600 }}>Why: </span>
+                  <span style={{ color: '#cbd5e1' }}>The current evidence suggests a backend dependency/configuration issue.</span>
                 </div>
               </div>
 
-              <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem', marginTop: '0.2rem' }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem' }}>
                 <button
                   type="button"
                   onClick={() => handleConfirmToolExecution(pendingToolCall, true)}
@@ -1176,20 +1242,21 @@ export default function App() {
                   style={{
                     display: 'inline-flex',
                     alignItems: 'center',
-                    gap: '0.4rem',
-                    padding: '0.45rem 1rem',
-                    backgroundColor: 'rgba(16, 185, 129, 0.22)',
+                    gap: '0.45rem',
+                    padding: '0.5rem 1.25rem',
+                    backgroundColor: '#10b981',
                     border: '1px solid #10b981',
-                    color: '#34d399',
+                    color: '#ffffff',
                     borderRadius: '6px',
-                    fontWeight: 600,
-                    fontSize: '0.82rem',
+                    fontWeight: 700,
+                    fontSize: '0.84rem',
                     cursor: loading ? 'not-allowed' : 'pointer',
+                    boxShadow: '0 2px 8px rgba(16, 185, 129, 0.35)',
                     transition: 'all 0.2s',
                   }}
                 >
                   <span>✓</span>
-                  <span>Allow & Run Test</span>
+                  <span>Allow</span>
                 </button>
                 <button
                   type="button"
@@ -1198,14 +1265,14 @@ export default function App() {
                   style={{
                     display: 'inline-flex',
                     alignItems: 'center',
-                    gap: '0.4rem',
-                    padding: '0.45rem 0.95rem',
-                    backgroundColor: 'rgba(239, 68, 68, 0.15)',
-                    border: '1px solid rgba(239, 68, 68, 0.45)',
+                    gap: '0.45rem',
+                    padding: '0.5rem 1.15rem',
+                    backgroundColor: 'rgba(239, 68, 68, 0.18)',
+                    border: '1px solid rgba(239, 68, 68, 0.5)',
                     color: '#f87171',
                     borderRadius: '6px',
                     fontWeight: 600,
-                    fontSize: '0.82rem',
+                    fontSize: '0.84rem',
                     cursor: loading ? 'not-allowed' : 'pointer',
                     transition: 'all 0.2s',
                   }}
@@ -1216,6 +1283,7 @@ export default function App() {
               </div>
             </div>
           )}
+
 
           {/* Phase 6: Active Tool Activity Banner */}
           {activeToolActivity && (
