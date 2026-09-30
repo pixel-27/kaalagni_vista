@@ -1,4 +1,5 @@
 import { useState, type ReactNode } from 'react'
+import { IconCopy, IconCheck } from './Icons'
 
 interface CodeBlockProps {
   children?: ReactNode
@@ -27,12 +28,12 @@ export function CodeBlock({ children, className }: CodeBlockProps) {
       <code
         style={{
           fontFamily: 'var(--font-mono)',
-          backgroundColor: 'rgba(56, 189, 248, 0.1)',
-          color: 'var(--accent-blue)',
-          padding: '0.15rem 0.4rem',
+          backgroundColor: 'rgba(255, 255, 255, 0.06)',
+          color: '#e2e8f0',
+          padding: '0.15rem 0.45rem',
           borderRadius: '4px',
           fontSize: '0.85em',
-          border: '1px solid rgba(56, 189, 248, 0.2)',
+          border: '1px solid rgba(255, 255, 255, 0.1)',
         }}
       >
         {children}
@@ -46,8 +47,9 @@ export function CodeBlock({ children, className }: CodeBlockProps) {
         margin: '0.85rem 0',
         borderRadius: '8px',
         border: '1px solid var(--border-subtle)',
-        backgroundColor: '#070a10',
+        backgroundColor: '#07090e',
         overflow: 'hidden',
+        boxShadow: '0 4px 16px rgba(0, 0, 0, 0.3)',
       }}
     >
       <div
@@ -55,29 +57,35 @@ export function CodeBlock({ children, className }: CodeBlockProps) {
           display: 'flex',
           justifyContent: 'space-between',
           alignItems: 'center',
-          padding: '0.35rem 0.85rem',
-          backgroundColor: '#101622',
+          padding: '0.4rem 0.85rem',
+          backgroundColor: '#0e1219',
           borderBottom: '1px solid var(--border-subtle)',
-          fontSize: '0.7rem',
+          fontSize: '0.68rem',
           fontFamily: 'var(--font-mono)',
           color: 'var(--text-muted)',
-          letterSpacing: '0.05em',
+          letterSpacing: '0.06em',
         }}
       >
-        <span>{language.toUpperCase()}</span>
+        <span style={{ fontWeight: 600, color: 'var(--text-secondary)' }}>{language.toUpperCase()}</span>
         <button
+          type="button"
           onClick={copyToClipboard}
           style={{
+            display: 'inline-flex',
+            alignItems: 'center',
+            gap: '0.35rem',
             background: 'transparent',
             color: copied ? 'var(--accent-emerald)' : 'var(--text-secondary)',
-            fontSize: '0.72rem',
-            padding: '0.15rem 0.4rem',
+            fontSize: '0.7rem',
+            padding: '0.15rem 0.45rem',
             borderRadius: '4px',
             cursor: 'pointer',
-            transition: 'color 0.2s',
+            transition: 'all 0.15s ease',
           }}
+          title="Copy code snippet to clipboard"
         >
-          {copied ? '✓ Copied' : 'Copy'}
+          {copied ? <IconCheck size={13} /> : <IconCopy size={13} />}
+          <span>{copied ? 'Copied' : 'Copy'}</span>
         </button>
       </div>
       <pre
@@ -87,7 +95,7 @@ export function CodeBlock({ children, className }: CodeBlockProps) {
           overflowX: 'auto',
           fontSize: '0.82rem',
           fontFamily: 'var(--font-mono)',
-          lineHeight: 1.55,
+          lineHeight: 1.6,
           color: '#e2e8f0',
         }}
       >

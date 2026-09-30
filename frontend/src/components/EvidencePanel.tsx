@@ -1,5 +1,15 @@
 import React, { useState } from 'react'
-import type { DiagnosticSession } from '../types'
+import type { DiagnosticSession, EvidenceClassification } from '../types'
+import {
+  IconCheck,
+  IconCheckCircle,
+  IconScale,
+  IconChevronDown,
+  IconChevronUp,
+  IconFlask,
+  IconFileText,
+  IconLayers,
+} from './Icons'
 
 interface EvidencePanelProps {
   session: DiagnosticSession
@@ -27,16 +37,17 @@ export const EvidencePanel: React.FC<EvidencePanelProps> = ({
             display: 'inline-flex',
             alignItems: 'center',
             gap: '0.3rem',
-            padding: '0.2rem 0.65rem',
-            borderRadius: '12px',
-            backgroundColor: 'rgba(16, 185, 129, 0.18)',
-            border: '1px solid #10b981',
-            color: '#34d399',
-            fontSize: '0.74rem',
+            padding: '0.2rem 0.6rem',
+            borderRadius: '9999px',
+            backgroundColor: 'var(--accent-emerald-subtle)',
+            border: '1px solid var(--accent-emerald-border)',
+            color: 'var(--accent-emerald)',
+            fontSize: '0.7rem',
             fontWeight: 700,
+            letterSpacing: '0.04em',
           }}
         >
-          <span>✓</span>
+          <IconCheck size={11} />
           <span>VERIFIED</span>
         </span>
       )
@@ -47,30 +58,58 @@ export const EvidencePanel: React.FC<EvidencePanelProps> = ({
           display: 'inline-flex',
           alignItems: 'center',
           gap: '0.3rem',
-          padding: '0.2rem 0.65rem',
-          borderRadius: '12px',
-          backgroundColor: 'rgba(245, 158, 11, 0.18)',
-          border: '1px solid #f59e0b',
-          color: '#fbbf24',
-          fontSize: '0.74rem',
+          padding: '0.2rem 0.6rem',
+          borderRadius: '9999px',
+          backgroundColor: 'var(--accent-amber-subtle)',
+          border: '1px solid var(--accent-amber-border)',
+          color: 'var(--accent-amber)',
+          fontSize: '0.7rem',
           fontWeight: 700,
+          letterSpacing: '0.04em',
         }}
       >
-        <span>●</span>
+        <span style={{ fontSize: '8px' }}>●</span>
         <span>LIKELY (UNVERIFIED)</span>
       </span>
     )
   }
 
+  const getClassificationStyle = (classification: EvidenceClassification) => {
+    switch (classification) {
+      case 'VERIFIED':
+        return {
+          color: 'var(--accent-emerald)',
+          bg: 'var(--accent-emerald-subtle)',
+          border: 'var(--accent-emerald-border)',
+        }
+      case 'OBSERVED':
+        return {
+          color: 'var(--accent-cyan)',
+          bg: 'var(--accent-cyan-subtle)',
+          border: 'var(--accent-cyan-border)',
+        }
+      case 'LIKELY':
+        return {
+          color: 'var(--accent-amber)',
+          bg: 'var(--accent-amber-subtle)',
+          border: 'var(--accent-amber-border)',
+        }
+      case 'UNKNOWN':
+      default:
+        return {
+          color: 'var(--text-muted)',
+          bg: 'rgba(255, 255, 255, 0.05)',
+          border: 'rgba(255, 255, 255, 0.1)',
+        }
+    }
+  }
+
   return (
     <div
+      className="glass-card"
       style={{
-        backgroundColor: 'rgba(15, 23, 42, 0.75)',
-        border: '1px solid rgba(255, 255, 255, 0.1)',
-        borderRadius: '12px',
-        padding: '1rem',
-        marginBottom: '1rem',
-        backdropFilter: 'blur(10px)',
+        padding: '0.95rem 1.15rem',
+        marginBottom: '0.85rem',
       }}
     >
       {/* Top Header */}
@@ -79,51 +118,65 @@ export const EvidencePanel: React.FC<EvidencePanelProps> = ({
           display: 'flex',
           alignItems: 'center',
           justifyContent: 'space-between',
-          borderBottom: isCollapsed ? 'none' : '1px solid rgba(255, 255, 255, 0.08)',
+          borderBottom: isCollapsed ? 'none' : '1px solid var(--border-subtle)',
           paddingBottom: isCollapsed ? 0 : '0.75rem',
           marginBottom: isCollapsed ? 0 : '0.85rem',
         }}
       >
-        <div style={{ display: 'flex', alignItems: 'center', gap: '0.65rem' }}>
-          <span style={{ fontSize: '1rem' }}>🔬</span>
+        <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem' }}>
+          <div
+            style={{
+              width: '28px',
+              height: '28px',
+              borderRadius: '6px',
+              backgroundColor: 'rgba(59, 130, 246, 0.12)',
+              border: '1px solid rgba(59, 130, 246, 0.25)',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              color: 'var(--accent-primary-light)',
+            }}
+          >
+            <IconFlask size={15} />
+          </div>
           <div>
             <div style={{ display: 'flex', alignItems: 'center', gap: '0.6rem' }}>
-              <span style={{ fontSize: '0.85rem', fontWeight: 700, color: '#f8fafc' }}>
+              <span style={{ fontSize: '0.82rem', fontWeight: 700, color: 'var(--text-primary)', letterSpacing: '0.02em' }}>
                 Diagnostic Telemetry & Evidence
               </span>
               {getStatusBadge()}
             </div>
             {report && (
-              <div style={{ fontSize: '0.75rem', color: '#94a3b8', marginTop: '0.15rem' }}>
+              <div style={{ fontSize: '0.74rem', color: 'var(--text-secondary)', marginTop: '0.15rem', lineHeight: 1.3 }}>
                 {report.diagnosis}
               </div>
             )}
           </div>
         </div>
 
-        <div style={{ display: 'flex', alignItems: 'center', gap: '0.6rem' }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: '0.65rem' }}>
           {/* Challenge Diagnosis Button */}
           <button
             type="button"
             onClick={onChallengeDiagnosis}
             disabled={isChallenging}
-            title="Perform a second diagnostic pass to test this diagnosis against alternative explanations"
+            title="Ask VISTA to reconsider its current conclusion"
             style={{
               display: 'inline-flex',
               alignItems: 'center',
-              gap: '0.35rem',
+              gap: '0.4rem',
               padding: '0.35rem 0.75rem',
               borderRadius: '6px',
-              backgroundColor: 'rgba(168, 85, 247, 0.16)',
-              border: '1px solid rgba(168, 85, 247, 0.45)',
-              color: '#c084fc',
-              fontSize: '0.75rem',
+              backgroundColor: isChallenging ? 'rgba(139, 92, 246, 0.08)' : 'var(--accent-purple-subtle)',
+              border: '1px solid var(--accent-purple-border)',
+              color: isChallenging ? 'var(--text-muted)' : '#c084fc',
+              fontSize: '0.72rem',
               fontWeight: 600,
               cursor: isChallenging ? 'not-allowed' : 'pointer',
-              transition: 'all 0.2s',
+              transition: 'all 0.15s ease',
             }}
           >
-            <span>⚖️</span>
+            <IconScale size={13} />
             <span>{isChallenging ? 'Re-evaluating...' : 'Challenge diagnosis'}</span>
           </button>
 
@@ -131,16 +184,18 @@ export const EvidencePanel: React.FC<EvidencePanelProps> = ({
             type="button"
             onClick={() => setIsCollapsed(!isCollapsed)}
             style={{
-              background: 'none',
-              border: 'none',
-              color: '#64748b',
-              fontSize: '0.9rem',
+              color: 'var(--text-muted)',
+              padding: '0.25rem',
+              borderRadius: '4px',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
               cursor: 'pointer',
-              padding: '0.2rem 0.4rem',
+              transition: 'color 0.15s ease',
             }}
-            title={isCollapsed ? 'Expand panel' : 'Collapse panel'}
+            title={isCollapsed ? 'Expand telemetry panel' : 'Collapse telemetry panel'}
           >
-            {isCollapsed ? '▼' : '▲'}
+            {isCollapsed ? <IconChevronDown size={16} /> : <IconChevronUp size={16} />}
           </button>
         </div>
       </div>
@@ -151,8 +206,11 @@ export const EvidencePanel: React.FC<EvidencePanelProps> = ({
           {challenge && (
             <div
               style={{
-                backgroundColor: challenge.outcome === 'reaffirmed' ? 'rgba(16, 185, 129, 0.1)' : 'rgba(245, 158, 11, 0.12)',
-                border: `1px solid ${challenge.outcome === 'reaffirmed' ? '#10b981' : '#f59e0b'}`,
+                backgroundColor:
+                  challenge.outcome === 'reaffirmed' ? 'rgba(16, 185, 129, 0.08)' : 'rgba(245, 158, 11, 0.08)',
+                border: `1px solid ${
+                  challenge.outcome === 'reaffirmed' ? 'var(--accent-emerald-border)' : 'var(--accent-amber-border)'
+                }`,
                 borderRadius: '8px',
                 padding: '0.75rem 0.95rem',
                 marginBottom: '0.85rem',
@@ -160,89 +218,114 @@ export const EvidencePanel: React.FC<EvidencePanelProps> = ({
             >
               <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '0.35rem' }}>
                 <div style={{ display: 'flex', alignItems: 'center', gap: '0.45rem' }}>
-                  <span style={{ fontSize: '0.85rem' }}>⚖️</span>
-                  <span style={{ fontSize: '0.8rem', fontWeight: 700, color: challenge.outcome === 'reaffirmed' ? '#34d399' : '#fbbf24' }}>
-                    Challenge Result: {challenge.outcome === 'reaffirmed' ? '✓ Reaffirmed & Strongly Supported' : '⚠️ Uncertain — Verification Recommended'}
+                  <IconScale size={14} style={{ color: challenge.outcome === 'reaffirmed' ? 'var(--accent-emerald)' : 'var(--accent-amber)' }} />
+                  <span
+                    style={{
+                      fontSize: '0.78rem',
+                      fontWeight: 700,
+                      color: challenge.outcome === 'reaffirmed' ? '#34d399' : '#fbbf24',
+                    }}
+                  >
+                    Challenge Result: {challenge.outcome === 'reaffirmed' ? 'Reaffirmed & Supported' : 'Uncertain — Verification Recommended'}
                   </span>
                 </div>
-                <span style={{ fontSize: '0.68rem', color: '#94a3b8' }}>
+                <span style={{ fontSize: '0.65rem', color: 'var(--text-muted)', fontFamily: 'var(--font-mono)' }}>
                   {new Date(challenge.challenged_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
                 </span>
               </div>
-              <div style={{ fontSize: '0.76rem', color: '#cbd5e1', lineHeight: 1.4, marginBottom: '0.35rem' }}>
+              <div style={{ fontSize: '0.74rem', color: '#cbd5e1', lineHeight: 1.45, marginBottom: '0.35rem' }}>
                 {challenge.rationale}
               </div>
-              <div style={{ fontSize: '0.73rem', color: '#94a3b8', fontStyle: 'italic' }}>
+              <div style={{ fontSize: '0.7rem', color: 'var(--text-muted)', fontStyle: 'italic' }}>
                 Alternative evaluated: &quot;{challenge.alternative_considered}&quot; — {challenge.alternative_status}
               </div>
             </div>
           )}
 
           {/* Nav Tabs */}
-          <div style={{ display: 'flex', gap: '0.4rem', marginBottom: '0.75rem' }}>
+          <div
+            style={{
+              display: 'flex',
+              gap: '0.35rem',
+              marginBottom: '0.75rem',
+              borderBottom: '1px solid rgba(255, 255, 255, 0.05)',
+              paddingBottom: '0.45rem',
+            }}
+          >
             <button
               type="button"
               onClick={() => setActiveTab('evidence')}
               style={{
-                padding: '0.3rem 0.75rem',
-                fontSize: '0.75rem',
+                display: 'inline-flex',
+                alignItems: 'center',
+                gap: '0.35rem',
+                padding: '0.28rem 0.65rem',
+                fontSize: '0.73rem',
                 fontWeight: 600,
                 borderRadius: '6px',
-                border: 'none',
-                backgroundColor: activeTab === 'evidence' ? 'var(--accent-blue)' : 'rgba(255, 255, 255, 0.05)',
-                color: activeTab === 'evidence' ? '#ffffff' : '#94a3b8',
+                border: '1px solid',
+                borderColor: activeTab === 'evidence' ? 'rgba(59, 130, 246, 0.4)' : 'transparent',
+                backgroundColor: activeTab === 'evidence' ? 'var(--accent-primary-subtle)' : 'transparent',
+                color: activeTab === 'evidence' ? 'var(--accent-primary-light)' : 'var(--text-muted)',
                 cursor: 'pointer',
+                transition: 'all 0.15s ease',
               }}
             >
-              Evidence ({session.evidence?.length || 0})
+              <IconCheckCircle size={13} />
+              <span>Evidence ({session.evidence?.length || 0})</span>
             </button>
             <button
               type="button"
               onClick={() => setActiveTab('hypotheses')}
               style={{
-                padding: '0.3rem 0.75rem',
-                fontSize: '0.75rem',
+                display: 'inline-flex',
+                alignItems: 'center',
+                gap: '0.35rem',
+                padding: '0.28rem 0.65rem',
+                fontSize: '0.73rem',
                 fontWeight: 600,
                 borderRadius: '6px',
-                border: 'none',
-                backgroundColor: activeTab === 'hypotheses' ? 'var(--accent-blue)' : 'rgba(255, 255, 255, 0.05)',
-                color: activeTab === 'hypotheses' ? '#ffffff' : '#94a3b8',
+                border: '1px solid',
+                borderColor: activeTab === 'hypotheses' ? 'rgba(59, 130, 246, 0.4)' : 'transparent',
+                backgroundColor: activeTab === 'hypotheses' ? 'var(--accent-primary-subtle)' : 'transparent',
+                color: activeTab === 'hypotheses' ? 'var(--accent-primary-light)' : 'var(--text-muted)',
                 cursor: 'pointer',
+                transition: 'all 0.15s ease',
               }}
             >
-              Hypotheses ({session.hypotheses?.length || 0})
+              <IconLayers size={13} />
+              <span>Hypotheses ({session.hypotheses?.length || 0})</span>
             </button>
             <button
               type="button"
               onClick={() => setActiveTab('plan')}
               style={{
-                padding: '0.3rem 0.75rem',
-                fontSize: '0.75rem',
+                display: 'inline-flex',
+                alignItems: 'center',
+                gap: '0.35rem',
+                padding: '0.28rem 0.65rem',
+                fontSize: '0.73rem',
                 fontWeight: 600,
                 borderRadius: '6px',
-                border: 'none',
-                backgroundColor: activeTab === 'plan' ? 'var(--accent-blue)' : 'rgba(255, 255, 255, 0.05)',
-                color: activeTab === 'plan' ? '#ffffff' : '#94a3b8',
+                border: '1px solid',
+                borderColor: activeTab === 'plan' ? 'rgba(59, 130, 246, 0.4)' : 'transparent',
+                backgroundColor: activeTab === 'plan' ? 'var(--accent-primary-subtle)' : 'transparent',
+                color: activeTab === 'plan' ? 'var(--accent-primary-light)' : 'var(--text-muted)',
                 cursor: 'pointer',
+                transition: 'all 0.15s ease',
               }}
             >
-              Investigation Plan ({session.plan?.steps?.length || 0})
+              <IconFileText size={13} />
+              <span>Investigation Plan ({session.plan?.steps?.length || 0})</span>
             </button>
           </div>
 
           {/* Tab 1: Evidence List */}
           {activeTab === 'evidence' && (
-            <div style={{ display: 'flex', flexDirection: 'column', gap: '0.45rem' }}>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '0.4rem' }}>
               {session.evidence && session.evidence.length > 0 ? (
                 session.evidence.map((item) => {
-                  const isVer = item.classification === 'VERIFIED'
-                  const isObs = item.classification === 'OBSERVED'
-                  const color = isVer ? '#34d399' : isObs ? 'var(--accent-cyan)' : '#fbbf24'
-                  const bg = isVer
-                    ? 'rgba(16, 185, 129, 0.12)'
-                    : isObs
-                    ? 'rgba(6, 182, 212, 0.12)'
-                    : 'rgba(245, 158, 11, 0.12)'
+                  const style = getClassificationStyle(item.classification)
 
                   return (
                     <div
@@ -250,36 +333,38 @@ export const EvidencePanel: React.FC<EvidencePanelProps> = ({
                       style={{
                         display: 'flex',
                         alignItems: 'flex-start',
-                        gap: '0.55rem',
-                        padding: '0.45rem 0.7rem',
+                        gap: '0.65rem',
+                        padding: '0.45rem 0.75rem',
                         backgroundColor: 'rgba(0, 0, 0, 0.25)',
-                        border: '1px solid rgba(255, 255, 255, 0.06)',
+                        border: '1px solid var(--border-subtle)',
                         borderRadius: '6px',
                       }}
                     >
                       <span
                         style={{
-                          fontSize: '0.66rem',
+                          fontSize: '0.65rem',
                           fontWeight: 700,
                           padding: '0.15rem 0.45rem',
                           borderRadius: '4px',
-                          backgroundColor: bg,
-                          color: color,
-                          border: `1px solid ${color}40`,
+                          backgroundColor: style.bg,
+                          color: style.color,
+                          border: `1px solid ${style.border}`,
                           letterSpacing: '0.04em',
-                          minWidth: '65px',
+                          minWidth: '68px',
                           textAlign: 'center',
+                          flexShrink: 0,
+                          marginTop: '1px',
                         }}
                       >
                         {item.classification}
                       </span>
                       <div style={{ flex: 1 }}>
-                        <div style={{ fontSize: '0.78rem', color: '#e2e8f0', lineHeight: 1.35 }}>
+                        <div style={{ fontSize: '0.76rem', color: '#e2e8f0', lineHeight: 1.4 }}>
                           {item.claim}
                         </div>
                         {item.tool_name && (
-                          <div style={{ fontSize: '0.68rem', color: '#64748b', marginTop: '0.15rem' }}>
-                            Source: {item.tool_name} {item.source}
+                          <div style={{ fontSize: '0.66rem', color: 'var(--text-muted)', marginTop: '0.15rem', fontFamily: 'var(--font-mono)' }}>
+                            Source: {item.tool_name} ({item.source})
                           </div>
                         )}
                       </div>
@@ -287,7 +372,7 @@ export const EvidencePanel: React.FC<EvidencePanelProps> = ({
                   )
                 })
               ) : (
-                <div style={{ fontSize: '0.76rem', color: '#64748b', fontStyle: 'italic', padding: '0.4rem 0' }}>
+                <div style={{ fontSize: '0.74rem', color: 'var(--text-muted)', fontStyle: 'italic', padding: '0.4rem 0' }}>
                   No evidence items recorded yet.
                 </div>
               )}
@@ -306,30 +391,41 @@ export const EvidencePanel: React.FC<EvidencePanelProps> = ({
                     <div
                       key={hyp.id}
                       style={{
-                        padding: '0.55rem 0.8rem',
-                        backgroundColor: isLeading ? 'rgba(59, 130, 246, 0.1)' : 'rgba(0, 0, 0, 0.25)',
-                        border: isLeading ? '1px solid var(--accent-blue)' : '1px solid rgba(255, 255, 255, 0.06)',
+                        padding: '0.6rem 0.85rem',
+                        backgroundColor: isLeading ? 'rgba(59, 130, 246, 0.08)' : 'rgba(0, 0, 0, 0.25)',
+                        border: isLeading ? '1px solid rgba(59, 130, 246, 0.4)' : '1px solid var(--border-subtle)',
                         borderRadius: '6px',
                       }}
                     >
-                      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '0.25rem' }}>
+                      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '0.3rem' }}>
                         <div style={{ display: 'flex', alignItems: 'center', gap: '0.45rem' }}>
-                          <span style={{ fontSize: '0.72rem', color: '#94a3b8', fontWeight: 600 }}>
+                          <span style={{ fontSize: '0.7rem', color: 'var(--text-secondary)', fontFamily: 'var(--font-mono)', fontWeight: 600 }}>
                             {hyp.id}
                           </span>
                           {isLeading && (
-                            <span style={{ fontSize: '0.65rem', padding: '0.1rem 0.4rem', backgroundColor: 'var(--accent-blue)', color: '#ffffff', borderRadius: '4px', fontWeight: 700 }}>
+                            <span
+                              style={{
+                                fontSize: '0.62rem',
+                                padding: '0.1rem 0.4rem',
+                                backgroundColor: 'var(--accent-primary)',
+                                color: '#ffffff',
+                                borderRadius: '4px',
+                                fontWeight: 700,
+                                letterSpacing: '0.04em',
+                              }}
+                            >
                               LEADING
                             </span>
                           )}
                         </div>
                         <span
                           style={{
-                            fontSize: '0.68rem',
-                            padding: '0.15rem 0.45rem',
+                            fontSize: '0.66rem',
+                            padding: '0.12rem 0.45rem',
                             borderRadius: '4px',
-                            backgroundColor: isVerified ? 'rgba(16, 185, 129, 0.2)' : 'rgba(255, 255, 255, 0.08)',
-                            color: isVerified ? '#34d399' : '#cbd5e1',
+                            backgroundColor: isVerified ? 'var(--accent-emerald-subtle)' : 'rgba(255, 255, 255, 0.06)',
+                            color: isVerified ? 'var(--accent-emerald)' : 'var(--text-secondary)',
+                            border: `1px solid ${isVerified ? 'var(--accent-emerald-border)' : 'rgba(255, 255, 255, 0.1)'}`,
                             fontWeight: 600,
                             textTransform: 'uppercase',
                           }}
@@ -337,19 +433,19 @@ export const EvidencePanel: React.FC<EvidencePanelProps> = ({
                           {hyp.status}
                         </span>
                       </div>
-                      <div style={{ fontSize: '0.78rem', color: '#f1f5f9', lineHeight: 1.35 }}>
+                      <div style={{ fontSize: '0.76rem', color: '#f1f5f9', lineHeight: 1.4 }}>
                         {hyp.description}
                       </div>
                       {hyp.verification_needed && (
-                        <div style={{ fontSize: '0.7rem', color: '#94a3b8', marginTop: '0.25rem' }}>
-                          Needed: {hyp.verification_needed}
+                        <div style={{ fontSize: '0.68rem', color: 'var(--text-muted)', marginTop: '0.25rem', fontFamily: 'var(--font-mono)' }}>
+                          Verification needed: {hyp.verification_needed}
                         </div>
                       )}
                     </div>
                   )
                 })
               ) : (
-                <div style={{ fontSize: '0.76rem', color: '#64748b', fontStyle: 'italic', padding: '0.4rem 0' }}>
+                <div style={{ fontSize: '0.74rem', color: 'var(--text-muted)', fontStyle: 'italic', padding: '0.4rem 0' }}>
                   No candidate hypotheses formulated yet.
                 </div>
               )}
@@ -358,7 +454,7 @@ export const EvidencePanel: React.FC<EvidencePanelProps> = ({
 
           {/* Tab 3: Investigation Plan */}
           {activeTab === 'plan' && (
-            <div style={{ display: 'flex', flexDirection: 'column', gap: '0.45rem' }}>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '0.4rem' }}>
               {session.plan?.steps && session.plan.steps.length > 0 ? (
                 session.plan.steps.map((step) => {
                   const isDone = step.status === 'completed'
@@ -371,13 +467,13 @@ export const EvidencePanel: React.FC<EvidencePanelProps> = ({
                         display: 'flex',
                         alignItems: 'center',
                         justifyContent: 'space-between',
-                        padding: '0.45rem 0.75rem',
+                        padding: '0.5rem 0.8rem',
                         backgroundColor: 'rgba(0, 0, 0, 0.25)',
-                        border: '1px solid rgba(255, 255, 255, 0.06)',
+                        border: '1px solid var(--border-subtle)',
                         borderRadius: '6px',
                       }}
                     >
-                      <div style={{ display: 'flex', alignItems: 'center', gap: '0.6rem' }}>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: '0.65rem' }}>
                         <span
                           style={{
                             display: 'inline-flex',
@@ -386,20 +482,24 @@ export const EvidencePanel: React.FC<EvidencePanelProps> = ({
                             width: '18px',
                             height: '18px',
                             borderRadius: '50%',
-                            fontSize: '0.68rem',
+                            fontSize: '0.65rem',
                             fontWeight: 700,
-                            backgroundColor: isDone ? '#10b981' : isRunning ? 'var(--accent-cyan)' : '#334155',
+                            backgroundColor: isDone
+                              ? 'var(--accent-emerald)'
+                              : isRunning
+                              ? 'var(--accent-primary)'
+                              : 'rgba(255, 255, 255, 0.1)',
                             color: '#ffffff',
                           }}
                         >
-                          {isDone ? '✓' : step.step_num}
+                          {isDone ? <IconCheck size={11} /> : step.step_num}
                         </span>
                         <div>
-                          <div style={{ fontSize: '0.78rem', color: isDone ? '#94a3b8' : '#f1f5f9', fontWeight: 500 }}>
+                          <div style={{ fontSize: '0.76rem', color: isDone ? 'var(--text-secondary)' : '#f1f5f9', fontWeight: 500 }}>
                             {step.action}
                           </div>
                           {step.note && (
-                            <div style={{ fontSize: '0.68rem', color: '#64748b' }}>
+                            <div style={{ fontSize: '0.67rem', color: 'var(--text-muted)', fontFamily: 'var(--font-mono)' }}>
                               {step.note}
                             </div>
                           )}
@@ -407,8 +507,8 @@ export const EvidencePanel: React.FC<EvidencePanelProps> = ({
                       </div>
                       <span
                         style={{
-                          fontSize: '0.66rem',
-                          color: isDone ? '#34d399' : isRunning ? 'var(--accent-cyan)' : '#64748b',
+                          fontSize: '0.65rem',
+                          color: isDone ? 'var(--accent-emerald)' : isRunning ? 'var(--accent-primary-light)' : 'var(--text-muted)',
                           fontWeight: 600,
                           textTransform: 'uppercase',
                         }}
@@ -419,7 +519,7 @@ export const EvidencePanel: React.FC<EvidencePanelProps> = ({
                   )
                 })
               ) : (
-                <div style={{ fontSize: '0.76rem', color: '#64748b', fontStyle: 'italic', padding: '0.4rem 0' }}>
+                <div style={{ fontSize: '0.74rem', color: 'var(--text-muted)', fontStyle: 'italic', padding: '0.4rem 0' }}>
                   No investigation plan initialized.
                 </div>
               )}

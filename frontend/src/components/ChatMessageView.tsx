@@ -1,6 +1,22 @@
 import ReactMarkdown from 'react-markdown'
 import { CodeBlock } from './CodeBlock'
 import type { ChatMessage } from '../types'
+import {
+  IconScreen,
+  IconPaperclip,
+  IconMicrophone,
+  IconVolume,
+  IconStop,
+  IconClock,
+  IconSearch,
+  IconFileText,
+  IconStethoscope,
+  IconFlask,
+  IconCheck,
+  IconAlertTriangle,
+  IconX,
+  IconTerminal,
+} from './Icons'
 
 interface ChatMessageViewProps {
   message: ChatMessage
@@ -17,6 +33,21 @@ export function ChatMessageView({ message, modelName, onSpeak, isSpeaking }: Cha
     ? new Date(message.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' })
     : ''
 
+  const getToolIcon = (toolName: string) => {
+    switch (toolName) {
+      case 'read_file':
+        return <IconFileText size={15} />
+      case 'search_code':
+        return <IconSearch size={15} />
+      case 'analyze_error':
+        return <IconStethoscope size={15} />
+      case 'run_test':
+        return <IconFlask size={15} />
+      default:
+        return <IconTerminal size={15} />
+    }
+  }
+
   if (isTool) {
     const tr = message.tool_result
     const toolName = tr?.tool || message.tool_call_id || 'diagnostic_tool'
@@ -29,88 +60,158 @@ export function ChatMessageView({ message, modelName, onSpeak, isSpeaking }: Cha
           display: 'flex',
           flexDirection: 'column',
           alignItems: 'flex-start',
-          margin: '0.85rem 0',
+          margin: '0.75rem 0',
           gap: '0.35rem',
           width: '100%',
         }}
       >
-        <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', fontSize: '0.72rem', color: 'var(--text-muted)' }}>
-          <span style={{ fontWeight: 600, color: '#a78bfa' }}>⚡ DIAGNOSTIC TOOL RESULT</span>
-          {formattedTime && <span>{formattedTime}</span>}
+        <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', fontSize: '0.7rem', color: 'var(--text-muted)' }}>
+          <span style={{ fontWeight: 600, color: 'var(--accent-primary-light)', letterSpacing: '0.04em' }}>
+            DIAGNOSTIC TOOL RESULT
+          </span>
+          {formattedTime && <span style={{ fontFamily: 'var(--font-mono)' }}>{formattedTime}</span>}
         </div>
+
         <div
           style={{
             width: '100%',
-            maxWidth: '92%',
-            backgroundColor: '#0f172a',
-            border: `1px solid ${status === 'success' ? 'rgba(16, 185, 129, 0.35)' : status === 'denied' ? 'rgba(245, 158, 11, 0.4)' : 'rgba(239, 68, 68, 0.4)'}`,
+            maxWidth: '94%',
+            backgroundColor: 'var(--bg-surface)',
+            border: `1px solid ${
+              status === 'success'
+                ? 'var(--accent-emerald-border)'
+                : status === 'denied'
+                ? 'var(--accent-amber-border)'
+                : 'var(--accent-rose-border)'
+            }`,
             borderRadius: '8px',
             overflow: 'hidden',
-            fontSize: '0.82rem',
+            fontSize: '0.8rem',
+            boxShadow: '0 2px 8px rgba(0, 0, 0, 0.3)',
           }}
         >
           <div
             style={{
               padding: '0.45rem 0.85rem',
-              backgroundColor: status === 'success' ? 'rgba(16, 185, 129, 0.1)' : status === 'denied' ? 'rgba(245, 158, 11, 0.1)' : 'rgba(239, 68, 68, 0.1)',
+              backgroundColor:
+                status === 'success'
+                  ? 'var(--accent-emerald-subtle)'
+                  : status === 'denied'
+                  ? 'var(--accent-amber-subtle)'
+                  : 'var(--accent-rose-subtle)',
               display: 'flex',
               alignItems: 'center',
               justifyContent: 'space-between',
-              borderBottom: '1px solid rgba(255, 255, 255, 0.08)',
+              borderBottom: '1px solid var(--border-subtle)',
             }}
           >
-            <span style={{ display: 'flex', alignItems: 'center', gap: '0.45rem', fontWeight: 600, color: '#f1f5f9' }}>
-              <span>{toolName === 'read_file' ? '📄' : toolName === 'search_code' ? '🔍' : toolName === 'analyze_error' ? '🩺' : '🧪'}</span>
-              <span>{toolName}</span>
+            <span style={{ display: 'flex', alignItems: 'center', gap: '0.45rem', fontWeight: 600, color: 'var(--text-primary)' }}>
+              <span style={{ color: 'var(--accent-primary-light)' }}>{getToolIcon(toolName)}</span>
+              <span style={{ fontFamily: 'var(--font-mono)' }}>{toolName}</span>
             </span>
-            <div style={{ display: 'flex', alignItems: 'center', gap: '0.6rem' }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '0.65rem' }}>
               {duration && (
-                <span style={{ color: 'var(--text-muted)', fontFamily: 'var(--font-mono)', fontSize: '0.7rem' }}>
-                  ⏱️ {duration}
+                <span
+                  style={{
+                    color: 'var(--text-muted)',
+                    fontFamily: 'var(--font-mono)',
+                    fontSize: '0.68rem',
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: '0.25rem',
+                  }}
+                >
+                  <IconClock size={12} />
+                  <span>{duration}</span>
                 </span>
               )}
               <span
                 style={{
-                  fontSize: '0.68rem',
-                  padding: '0.1rem 0.45rem',
+                  fontSize: '0.66rem',
+                  padding: '0.12rem 0.45rem',
                   borderRadius: '4px',
-                  fontWeight: 600,
-                  backgroundColor: status === 'success' ? 'rgba(16, 185, 129, 0.2)' : status === 'denied' ? 'rgba(245, 158, 11, 0.25)' : 'rgba(239, 68, 68, 0.2)',
+                  fontWeight: 700,
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: '0.25rem',
+                  backgroundColor:
+                    status === 'success'
+                      ? 'rgba(16, 185, 129, 0.2)'
+                      : status === 'denied'
+                      ? 'rgba(245, 158, 11, 0.2)'
+                      : 'rgba(239, 68, 68, 0.2)',
                   color: status === 'success' ? '#34d399' : status === 'denied' ? '#fbbf24' : '#f87171',
+                  border: `1px solid ${
+                    status === 'success'
+                      ? 'var(--accent-emerald-border)'
+                      : status === 'denied'
+                      ? 'var(--accent-amber-border)'
+                      : 'var(--accent-rose-border)'
+                  }`,
                 }}
               >
-                {status === 'success' ? '✅ COMPLETED' : status === 'denied' ? '🚫 DENIED' : '❌ ERROR'}
+                {status === 'success' ? (
+                  <>
+                    <IconCheck size={11} />
+                    <span>COMPLETED</span>
+                  </>
+                ) : status === 'denied' ? (
+                  <>
+                    <IconX size={11} />
+                    <span>DENIED</span>
+                  </>
+                ) : (
+                  <>
+                    <IconAlertTriangle size={11} />
+                    <span>ERROR</span>
+                  </>
+                )}
               </span>
             </div>
           </div>
+
           <div style={{ padding: '0.65rem 0.85rem' }}>
             {tr?.error ? (
-              <div style={{ color: status === 'denied' ? '#fbbf24' : '#f87171', fontFamily: 'var(--font-mono)', fontSize: '0.78rem' }}>
+              <div
+                style={{
+                  color: status === 'denied' ? 'var(--accent-amber)' : 'var(--accent-rose)',
+                  fontFamily: 'var(--font-mono)',
+                  fontSize: '0.76rem',
+                  lineHeight: 1.45,
+                }}
+              >
                 {tr.error}
               </div>
             ) : tr?.output ? (
               <details open style={{ cursor: 'pointer' }}>
-                <summary style={{ color: 'var(--text-muted)', fontSize: '0.72rem', marginBottom: '0.35rem', userSelect: 'none' }}>
-                  Inspection Telemetry (Click to collapse)
+                <summary
+                  style={{
+                    color: 'var(--text-muted)',
+                    fontSize: '0.7rem',
+                    marginBottom: '0.35rem',
+                    userSelect: 'none',
+                    fontWeight: 500,
+                  }}
+                >
+                  Inspection Telemetry (Click to toggle)
                 </summary>
                 <pre
                   style={{
                     margin: 0,
-                    padding: '0.5rem',
-                    backgroundColor: '#0a0f18',
+                    padding: '0.55rem',
+                    backgroundColor: '#080a0f',
                     borderRadius: '4px',
                     fontFamily: 'var(--font-mono)',
-                    fontSize: '0.75rem',
-                    maxHeight: '240px',
+                    fontSize: '0.74rem',
+                    maxHeight: '260px',
                     overflowY: 'auto',
                     whiteSpace: 'pre-wrap',
                     wordBreak: 'break-word',
                     color: '#e2e8f0',
+                    border: '1px solid var(--border-subtle)',
                   }}
                 >
-                  {typeof tr.output === 'string'
-                    ? tr.output
-                    : JSON.stringify(tr.output, null, 2)}
+                  {typeof tr.output === 'string' ? tr.output : JSON.stringify(tr.output, null, 2)}
                 </pre>
               </details>
             ) : (
@@ -133,40 +234,42 @@ export function ChatMessageView({ message, modelName, onSpeak, isSpeaking }: Cha
           gap: '0.35rem',
         }}
       >
-        <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', fontSize: '0.72rem', color: 'var(--text-muted)' }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', fontSize: '0.7rem', color: 'var(--text-muted)' }}>
           {message.input_mode === 'voice' && (
             <span
               style={{
-                fontSize: '0.66rem',
+                fontSize: '0.65rem',
                 fontFamily: 'var(--font-mono)',
                 padding: '0.1rem 0.4rem',
                 borderRadius: '4px',
-                backgroundColor: 'rgba(6, 182, 212, 0.15)',
+                backgroundColor: 'var(--accent-cyan-subtle)',
                 color: 'var(--accent-cyan)',
-                border: '1px solid rgba(6, 182, 212, 0.35)',
+                border: '1px solid var(--accent-cyan-border)',
                 display: 'inline-flex',
                 alignItems: 'center',
                 gap: '0.25rem',
               }}
               title="Query submitted via voice input"
             >
-              🎙 Spoken
+              <IconMicrophone size={11} />
+              <span>Spoken</span>
             </span>
           )}
-          {formattedTime && <span>{formattedTime}</span>}
-          <span style={{ fontWeight: 600, color: 'var(--accent-cyan)' }}>YOU</span>
+          {formattedTime && <span style={{ fontFamily: 'var(--font-mono)' }}>{formattedTime}</span>}
+          <span style={{ fontWeight: 600, color: 'var(--text-secondary)' }}>YOU</span>
         </div>
+
         <div
           style={{
             maxWidth: '82%',
-            backgroundColor: '#162235',
-            border: '1px solid #1e3a5f',
-            borderRadius: '12px 12px 2px 12px',
+            backgroundColor: 'var(--bg-surface-elevated)',
+            border: '1px solid var(--border-medium)',
+            borderRadius: '10px 10px 2px 10px',
             padding: '0.85rem 1.15rem',
             color: 'var(--text-primary)',
-            fontSize: '0.9rem',
+            fontSize: '0.88rem',
             lineHeight: 1.55,
-            boxShadow: '0 2px 8px rgba(0, 0, 0, 0.25)',
+            boxShadow: '0 2px 10px rgba(0, 0, 0, 0.3)',
             display: 'flex',
             flexDirection: 'column',
             gap: '0.65rem',
@@ -175,12 +278,8 @@ export function ChatMessageView({ message, modelName, onSpeak, isSpeaking }: Cha
           {message.attachments && message.attachments.length > 0 && (
             <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem' }}>
               {message.attachments.map((att, idx) => {
-                const src = att.data.startsWith('data:')
-                  ? att.data
-                  : `data:${att.mime_type};base64,${att.data}`
-                const sizeLabel = att.size_bytes
-                  ? `${(att.size_bytes / 1024).toFixed(1)} KB`
-                  : null
+                const src = att.data.startsWith('data:') ? att.data : `data:${att.mime_type};base64,${att.data}`
+                const sizeLabel = att.size_bytes ? `${(att.size_bytes / 1024).toFixed(1)} KB` : null
 
                 return (
                   <div
@@ -189,31 +288,29 @@ export function ChatMessageView({ message, modelName, onSpeak, isSpeaking }: Cha
                       borderRadius: '8px',
                       overflow: 'hidden',
                       backgroundColor: 'rgba(0, 0, 0, 0.35)',
-                      border: '1px solid rgba(255, 255, 255, 0.12)',
+                      border: '1px solid var(--border-subtle)',
                     }}
                   >
                     <div
                       style={{
                         padding: '0.35rem 0.65rem',
-                        fontSize: '0.72rem',
+                        fontSize: '0.7rem',
                         color: 'var(--accent-cyan)',
                         display: 'flex',
                         alignItems: 'center',
                         justifyContent: 'space-between',
-                        backgroundColor: 'rgba(0, 0, 0, 0.3)',
-                        borderBottom: '1px solid rgba(255, 255, 255, 0.08)',
+                        backgroundColor: 'rgba(0, 0, 0, 0.25)',
+                        borderBottom: '1px solid var(--border-subtle)',
                       }}
                     >
                       <span style={{ display: 'flex', alignItems: 'center', gap: '0.4rem' }}>
-                        <span>{att.source === 'screen' ? '🖥️' : '📷'}</span>
+                        {att.source === 'screen' ? <IconScreen size={13} /> : <IconPaperclip size={13} />}
                         <strong>
                           {att.filename || (att.source === 'screen' ? 'Captured Screen Context' : 'Attached Screenshot')}
                         </strong>
                       </span>
                       {sizeLabel && (
-                        <span style={{ color: 'var(--text-muted)', fontFamily: 'var(--font-mono)' }}>
-                          {sizeLabel}
-                        </span>
+                        <span style={{ color: 'var(--text-muted)', fontFamily: 'var(--font-mono)' }}>{sizeLabel}</span>
                       )}
                     </div>
                     <img
@@ -221,10 +318,10 @@ export function ChatMessageView({ message, modelName, onSpeak, isSpeaking }: Cha
                       alt={att.filename || 'Attached technical screenshot'}
                       style={{
                         maxWidth: '100%',
-                        maxHeight: '360px',
+                        maxHeight: '340px',
                         display: 'block',
                         objectFit: 'contain',
-                        backgroundColor: '#0a0f18',
+                        backgroundColor: '#07090e',
                       }}
                     />
                   </div>
@@ -232,15 +329,13 @@ export function ChatMessageView({ message, modelName, onSpeak, isSpeaking }: Cha
               })}
             </div>
           )}
-          <div style={{ whiteSpace: 'pre-wrap', wordBreak: 'break-word' }}>
-            {message.content}
-          </div>
+          <div style={{ whiteSpace: 'pre-wrap', wordBreak: 'break-word' }}>{message.content}</div>
         </div>
-
       </div>
     )
   }
 
+  // Assistant Response
   return (
     <div
       style={{
@@ -249,22 +344,24 @@ export function ChatMessageView({ message, modelName, onSpeak, isSpeaking }: Cha
         alignItems: 'flex-start',
         margin: '1.25rem 0',
         gap: '0.45rem',
+        width: '100%',
       }}
     >
-      <div style={{ display: 'flex', alignItems: 'center', gap: '0.65rem' }}>
+      {/* Header Info */}
+      <div style={{ display: 'flex', alignItems: 'center', gap: '0.65rem', width: '100%' }}>
         <div
           style={{
-            width: '26px',
-            height: '26px',
+            width: '24px',
+            height: '24px',
             borderRadius: '6px',
-            background: 'linear-gradient(135deg, #0284c7 0%, #06b6d4 100%)',
+            background: 'linear-gradient(135deg, #1d4ed8 0%, #3b82f6 100%)',
             display: 'flex',
             alignItems: 'center',
             justifyContent: 'center',
             fontWeight: 700,
-            fontSize: '13px',
+            fontSize: '12px',
             color: '#ffffff',
-            boxShadow: '0 0 10px rgba(6, 182, 212, 0.4)',
+            boxShadow: '0 0 10px rgba(59, 130, 246, 0.35)',
           }}
         >
           V
@@ -275,13 +372,13 @@ export function ChatMessageView({ message, modelName, onSpeak, isSpeaking }: Cha
         {modelName && (
           <span
             style={{
-              fontSize: '0.68rem',
+              fontSize: '0.66rem',
               fontFamily: 'var(--font-mono)',
-              padding: '0.1rem 0.45rem',
+              padding: '0.12rem 0.45rem',
               borderRadius: '4px',
-              backgroundColor: '#172033',
-              color: 'var(--accent-blue)',
-              border: '1px solid #1e2d4a',
+              backgroundColor: 'rgba(59, 130, 246, 0.1)',
+              color: 'var(--accent-primary-light)',
+              border: '1px solid rgba(59, 130, 246, 0.25)',
             }}
           >
             {modelName}
@@ -291,36 +388,37 @@ export function ChatMessageView({ message, modelName, onSpeak, isSpeaking }: Cha
           <button
             type="button"
             onClick={() => onSpeak(message.content)}
-            title={isSpeaking ? 'Stop text-to-speech audio playback' : 'Read VISTA response aloud with text-to-speech'}
+            title={isSpeaking ? 'Stop speech playback' : 'Read VISTA response aloud with text-to-speech'}
             style={{
               display: 'inline-flex',
               alignItems: 'center',
               gap: '0.3rem',
-              padding: '0.15rem 0.5rem',
-              fontSize: '0.72rem',
+              padding: '0.15rem 0.45rem',
+              fontSize: '0.7rem',
               borderRadius: '4px',
-              backgroundColor: isSpeaking ? 'rgba(239, 68, 68, 0.15)' : 'rgba(255, 255, 255, 0.05)',
-              border: isSpeaking ? '1px solid rgba(239, 68, 68, 0.4)' : '1px solid rgba(255, 255, 255, 0.1)',
-              color: isSpeaking ? '#f43f5e' : 'var(--text-secondary)',
+              backgroundColor: isSpeaking ? 'var(--accent-rose-subtle)' : 'rgba(255, 255, 255, 0.05)',
+              border: isSpeaking ? '1px solid var(--accent-rose-border)' : '1px solid var(--border-subtle)',
+              color: isSpeaking ? 'var(--accent-rose)' : 'var(--text-secondary)',
               cursor: 'pointer',
-              transition: 'all 0.2s',
+              transition: 'all 0.15s ease',
             }}
           >
-            <span>{isSpeaking ? '⏹' : '🔊'}</span>
+            {isSpeaking ? <IconStop size={12} /> : <IconVolume size={12} />}
             <span>{isSpeaking ? 'Stop' : 'Speak'}</span>
           </button>
         )}
         {formattedTime && (
-          <span style={{ fontSize: '0.7rem', color: 'var(--text-muted)', marginLeft: 'auto' }}>
+          <span style={{ fontSize: '0.68rem', color: 'var(--text-muted)', marginLeft: 'auto', fontFamily: 'var(--font-mono)' }}>
             {formattedTime}
           </span>
         )}
       </div>
 
+      {/* Assistant Body Container */}
       <div
         style={{
           width: '100%',
-          backgroundColor: 'var(--bg-secondary)',
+          backgroundColor: 'var(--bg-surface)',
           border: '1px solid var(--border-subtle)',
           borderRadius: '2px 12px 12px 12px',
           padding: '1.15rem 1.35rem',
@@ -342,7 +440,11 @@ export function ChatMessageView({ message, modelName, onSpeak, isSpeaking }: Cha
               return <h2 style={{ fontSize: '1.05rem', margin: '0.65rem 0 0.35rem', color: '#f1f5f9', fontWeight: 600 }}>{children}</h2>
             },
             h3({ children }) {
-              return <h3 style={{ fontSize: '0.95rem', margin: '0.55rem 0 0.3rem', color: 'var(--accent-cyan)', fontWeight: 600 }}>{children}</h3>
+              return (
+                <h3 style={{ fontSize: '0.92rem', margin: '0.55rem 0 0.3rem', color: 'var(--accent-primary-light)', fontWeight: 600 }}>
+                  {children}
+                </h3>
+              )
             },
             p({ children }) {
               return <p style={{ margin: '0.45rem 0' }}>{children}</p>
@@ -360,7 +462,7 @@ export function ChatMessageView({ message, modelName, onSpeak, isSpeaking }: Cha
               return (
                 <blockquote
                   style={{
-                    borderLeft: '3px solid var(--accent-cyan)',
+                    borderLeft: '3px solid var(--accent-primary)',
                     paddingLeft: '0.85rem',
                     margin: '0.75rem 0',
                     color: 'var(--text-secondary)',
@@ -379,10 +481,23 @@ export function ChatMessageView({ message, modelName, onSpeak, isSpeaking }: Cha
           {message.content}
         </ReactMarkdown>
 
+        {/* Controlled Tool Call Requests from LLM */}
         {message.tool_calls && message.tool_calls.length > 0 && (
-          <div style={{ marginTop: '0.75rem', paddingTop: '0.65rem', borderTop: '1px solid rgba(255, 255, 255, 0.08)' }}>
-            <div style={{ fontSize: '0.72rem', color: '#a78bfa', fontWeight: 600, marginBottom: '0.35rem', display: 'flex', alignItems: 'center', gap: '0.35rem' }}>
-              <span>🔧</span>
+          <div style={{ marginTop: '0.85rem', paddingTop: '0.75rem', borderTop: '1px solid var(--border-subtle)' }}>
+            <div
+              style={{
+                fontSize: '0.7rem',
+                color: 'var(--accent-primary-light)',
+                fontWeight: 600,
+                marginBottom: '0.4rem',
+                display: 'flex',
+                alignItems: 'center',
+                gap: '0.4rem',
+                letterSpacing: '0.04em',
+                textTransform: 'uppercase',
+              }}
+            >
+              <IconTerminal size={14} />
               <span>Requested Controlled Diagnostic Action:</span>
             </div>
             <div style={{ display: 'flex', flexDirection: 'column', gap: '0.35rem' }}>
@@ -393,16 +508,16 @@ export function ChatMessageView({ message, modelName, onSpeak, isSpeaking }: Cha
                     display: 'flex',
                     alignItems: 'center',
                     gap: '0.5rem',
-                    fontSize: '0.75rem',
+                    fontSize: '0.74rem',
                     fontFamily: 'var(--font-mono)',
-                    backgroundColor: 'rgba(167, 139, 250, 0.12)',
+                    backgroundColor: 'rgba(59, 130, 246, 0.08)',
                     padding: '0.35rem 0.65rem',
                     borderRadius: '4px',
-                    border: '1px solid rgba(167, 139, 250, 0.35)',
+                    border: '1px solid rgba(59, 130, 246, 0.25)',
                     color: '#f1f5f9',
                   }}
                 >
-                  <span>{tc.tool === 'read_file' ? '📄' : tc.tool === 'search_code' ? '🔍' : tc.tool === 'analyze_error' ? '🩺' : '🧪'}</span>
+                  <span style={{ color: 'var(--accent-primary-light)' }}>{getToolIcon(tc.tool)}</span>
                   <strong>{tc.tool}</strong>
                   <span style={{ color: 'var(--text-muted)' }}>{JSON.stringify(tc.arguments)}</span>
                 </div>
