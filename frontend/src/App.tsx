@@ -42,6 +42,8 @@ import {
 } from './services/screen'
 import { executeTool } from './services/tools'
 
+const BACKEND_URL = (import.meta.env.VITE_BACKEND_URL || '').replace(/\/$/, '')
+
 const QUICK_STARTERS = [
   {
     title: 'Screen Context Diagnosis',
@@ -218,9 +220,13 @@ export default function App() {
     try {
       let res: Response
       try {
-        res = await fetch('/api/health')
+        res = await fetch(`${BACKEND_URL}/api/health`)
       } catch {
-        res = await fetch('http://127.0.0.1:8000/api/health')
+        if (!BACKEND_URL) {
+          res = await fetch('http://127.0.0.1:8000/api/health')
+        } else {
+          throw new Error('Health check request failed')
+        }
       }
       const elapsed = Math.round(performance.now() - start)
       setLatency(elapsed)
@@ -367,17 +373,21 @@ export default function App() {
     }
 
     try {
-      res = await fetch('/api/chat', {
+      res = await fetch(`${BACKEND_URL}/api/chat`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(payload),
       })
-    } catch {
-      res = await fetch('http://127.0.0.1:8000/api/chat', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(payload),
-      })
+    } catch (err) {
+      if (!BACKEND_URL) {
+        res = await fetch('http://127.0.0.1:8000/api/chat', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(payload),
+        })
+      } else {
+        throw err
+      }
     }
 
     if (!res.ok) {
@@ -1066,7 +1076,7 @@ export default function App() {
           }}
         >
           <div style={{ display: 'flex', gap: '1.25rem', flexWrap: 'wrap' }}>
-            <span>Backend: <strong style={{ color: '#fff' }}>http://127.0.0.1:8000</strong></span>
+            <span>Backend: <strong style={{ color: '#fff' }}>{BACKEND_URL || 'http://127.0.0.1:8000'}</strong></span>
             <span>Status: <strong style={{ color: 'var(--accent-emerald)' }}>{health?.status || 'unknown'}</strong></span>
             <span>Version: <strong style={{ color: 'var(--accent-primary-light)' }}>{health?.version || '0.2.0'}</strong></span>
             <span>Environment: <strong>{health?.environment || 'development'}</strong></span>
