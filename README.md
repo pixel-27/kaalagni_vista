@@ -31,7 +31,7 @@ The system strictly adheres to **human-in-the-loop** safety: execution-level act
 
 ---
 
-## Phase 7 Architecture: Controlled Agentic Diagnostic System
+## Architecture: Controlled Agentic Diagnostic System
 
 ```
 kaalagni/
@@ -103,7 +103,7 @@ kaalagni/
 
 ---
 
-## Phase 7 Core Features
+## Core Features
 
 ### 1. Deterministic Diagnostic State Machine
 VISTA tracks diagnostic progress across deterministic, serializable states:
